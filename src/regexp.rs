@@ -351,7 +351,6 @@ impl RangeNode {
     }
     
     fn parse_next(chars: &mut Peekable) -> Range {
-        let mut special = false;
         let ch0 = chars.next().unwrap();     // empty case is handled in caller
         let ch1 = chars.peek().unwrap_or('x');
         if ch0 == '\\' {

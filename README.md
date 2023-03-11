@@ -6,18 +6,8 @@ The Rust version works, but as opposed to other languages it was a poor choice. 
 
 That leads into this second project. I wrote a [regexp search program in C](https://young-0.com/regexp) some time ago, and though I haven't redone it since a little review brought to mind the design, and after a few week's rest I decided to give it a go.
 
-This is into the first try. The tree parser is almost written - it compiles, but I haven't run it yet. Still, I've hit my first roadblock, and if anyone reads this I'd appreciate opinions.
+### _The current state_
 
-### _The problem_
+Builds, not really tested. It has already been through two iterations, the first enclosing the **Node** structs in **Box**es, but that ran into problems because I couldn't extract the full structures from the **dyn Node** type. I decided to replace the **Box** container with **enum** to wrap the **Node* structs. This (seems to) work - I was able to make code to extract a reference to the structs from the enums, though I needed help from rust-lang.org to get mutable refs out (I just couldn't get the right combination of mut's, &'s, and the match statemnt)
 
-I have a trait for a tree node and several structs that implement it: **CharsNode**, **AndNode**, **OrNode**, **RangeNode**,... The **AndNode** holds a **Vec<Box<dyn TreeNode>>**. The problem comes in when the parser hits a **"\|"** in the input. The algorithm is simple: if the preceding Node in the **AndNode** is an **OrNode** add the condition to it, otherwise move the preceding **Node** to the first slot of the **OrNode** and replace it in the **AndNode** list with the **OrNode**. Problem: the preceding item is a **Node**. The **Node** trait lets me see what it is but I can't figure out how to access it as an **OrNode** and not a **Node**.
-
-### _Potential Solutions_
-
-The simplest solution would probably be some way of casting the **Node** to an **OrNode**, probably in an **unsafe {}** block. So that is question 1: can this be done?
-
-The second, rather inelegant, solution is to have a special case that recognizes an **OrNode** and holds a ref to it as an **OrNode**. This is doable, but ugly - the parsing stuff is all localized in one place, doing this would require moving some of it from a **parse()** function into the **AndNode.parse()** method, removing the logic from one location and spreading it out. Designwise I don't like this - splitting the logic up both makes it harder to understand and more likely to introduce bugs.
-
-The third, which is probably what I will try first, is to use an enum for the **Node**s, rather than relying on the trait. That is, rather than **AndNode** holding its child nodes in a **Vec<Box<dyn Node>>** it will use an enum
-**enum Node {Chars(CharsNode), And(AndNode), Or(OrNode), ...}**  
-This not only makes identifying a **Node** easy, but should allow me to get a reference to any **Node**. Should this work?
+To me this feels much more like a Rust program than Tetrii did. In particular, it starts to make use of features like traits, enums, and distinguishes between mutable and immutable. I'd be curious to hear what others think.
