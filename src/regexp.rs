@@ -342,10 +342,8 @@ impl RangeNode {
         let mut terminated = false;
         let mut targets = Vec::<Range>::new();
         let mut not = false;
-        let ch0 = chars.peek();
-        if ch0.is_some() {
-            let ch0 = ch0.unwrap();
-            if ch0 == '^' {
+        if let Some(ch) = chars.peek() {
+            if ch == '^' {
                 let _ = chars.next();
                 not = true;
             }
@@ -374,9 +372,9 @@ impl RangeNode {
             Range::SpecialChar(ch1)
         } else if ch1 == '-' {
             let _ = chars.next();
-            let ch2 = chars.next();
-            if ch2.is_none() { Range::SingleChar('-') }
-            else {Range::Range(ch0, ch2.unwrap()) }
+            if let Some(ch2) = chars.next() {
+                Range::Range(ch0, ch2)
+            } else { Range::SingleChar('-') }
         } else {
             Range::SingleChar(ch0)
         }
@@ -450,7 +448,7 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
 // Main entry point for parsing tree
 //
 // Wraps the in put with "\(...\)" so it becomes an AND node, and sticks the SUCCESS node on the end when done
-pub fn parse_tree(input: &mut String) -> Result<Node, String> {
+pub fn parse_tree(input: &mut str) -> Result<Node, String> {
     // wrap the string in "\(...\)" to make it an implicit AND node
     let mut chars = Peekable::new(input);
     chars.push('\\');
@@ -473,7 +471,7 @@ pub struct Match {
 
 }
 
-pub fn walk_tree(tree: Node, text: &String) -> Option<Match> {
+pub fn walk_tree(_tree: Node, _text: &str) -> Option<Match> {
     None
 }
 //////////////////////////////////////////////////////////////////
@@ -510,8 +508,8 @@ fn custom_rep(chars: &mut Peekable) -> Result<(usize, usize), String> {
     match peek.unwrap() {
         '}'=> Ok((num, num)),
         ','=> {
-            let n2 = read_int(chars);
-            let n2 = if n2.is_none() {EFFECTIVELY_INFINITE} else {n2.unwrap()};
+            let n2 = if let Some(n) = read_int(chars) { n }
+            else { EFFECTIVELY_INFINITE };
             let terminate = chars.next();
             if terminate.unwrap_or('x') != '}' { return Err("Malformed repetition block error 1".to_string()); }
             Ok((num, n2))
@@ -627,9 +625,7 @@ impl<'a> Peekable<'a> {
     // peek_next() gets the next unread character, adds it to the peeked list, and returns it
     fn peek_next(&mut self) -> Option<char> {
         let ch = self.next_i();
-        if ch.is_some() {
-            self.peeked.push(ch.unwrap());
-        }
+        if let Some(c) = ch { self.peeked.push(c); }
         ch
     }
 
