@@ -2,14 +2,18 @@ use std::str::Chars;
 
 const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
 const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
-const TAB_INDENT:usize = 4;                     // indent in Debug display
+const TAB_INDENT:usize = 2;                     // indent in Debug display
 
 //#[derive(PartialEq)]
 pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Range(RangeNode), Success, None, }
 use core::fmt::Debug;
 impl Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.tree_node().desc(0))
+        write!(f, "{}", match self {
+            Node::Success => "Success".to_string(),
+            Node::None => "None".to_string(),
+            _ => self.tree_node().unwrap().desc(0)
+        })
     }
 }
 
@@ -41,35 +45,37 @@ impl Node {
     
     // this gets a reference to the enclosed data as an immutable TreeNode. To get a ref to the object itself
     // use (or add) the methods below
-    fn tree_node(&self) -> &dyn TreeNode {
+    fn tree_node(&self) -> Option<&dyn TreeNode> {
         match self {
-            Node::Chars(a)       => a,
-            Node::SpecialChar(a) => a,
-            Node::And(a)         => a,
-            Node::Or(a)          => a,
-            Node::Range(a)       => a,
-            Node::Success        => panic!("trying to access Success node struct"),
-            Node::None           => panic!("trying to access None node struct"),
+            Node::Chars(a)       => Some(a),
+            Node::SpecialChar(a) => Some(a),
+            Node::And(a)         => Some(a),
+            Node::Or(a)          => Some(a),
+            Node::Range(a)       => Some(a),
+            Node::Success        => None,
+            Node::None           => None,
         }
     }
     // following are methods to access the different types by ref, muable and immutable. I wonder if it is possible
     // for a single templae to handle all cases?
+    // These are for internal use, not API, so any bad call is a programming error, not a user error. That is why tey
+    // panic rather than return Option
     fn or_ref(&self) -> &OrNode {
         match self {
-            Node::Or(node) => &node,
+            Node::Or(node) => node,
             _ => panic!("Attempting to get ref to OrNode from wrong Node type")
         }
     }
     // thank you rust-lang.org
-    fn or_mut_ref(&mut self)->Option<&mut OrNode> {
+    fn or_mut_ref(&mut self) -> &mut OrNode {
         match self {
-            Node::Or(or_node) => Some(or_node),
+            Node::Or(or_node) => or_node,
             _ => panic!("Attempting to get mut ref to OrNode from wrong Node type")
         }
     }
-    fn and_mut_ref(&mut self)->Option<&mut AndNode> {
+    fn and_mut_ref(&mut self)->&mut AndNode {
         match self {
-            Node::And(and_node) => Some(and_node),
+            Node::And(and_node) => and_node,
             _ => panic!("Attempting to get mut ref to AndNode from wrong Node type")
         }
     }
@@ -169,7 +175,6 @@ impl TreeNode for SpecialCharNode {
         let slash = if self.special == '.' { "" } else { "\\" };
         format!("{}SpecialCharNode: '{}{}'", pad(indent), slash, self.special)
     }
-
 }
 
     
@@ -179,11 +184,14 @@ impl TreeNode for AndNode {
     fn desc(&self, indent: usize) -> String {
         let mut msg = format!("{}AndNode {}", pad(indent), self.limit_str());
         for i in 0..self.nodes.len() {
-            msg.push_str(format!("\n{}", self.nodes[i].tree_node().desc(indent + 1)).as_str());
+            let disp_str = match self.nodes[i].tree_node() {
+                Some(node) => node.desc(indent + 1),
+                None => format!("{:?}", self.nodes[i]),
+            };
+            msg.push_str(format!("\n{}", disp_str).as_str());
         }
         msg
     }
-    
 }
 
 impl TreeNode for OrNode {
@@ -191,7 +199,11 @@ impl TreeNode for OrNode {
     fn desc(&self, indent: usize) -> String {
         let mut msg = format!("{}OrNode", pad(indent), );
         for i in 0..self.nodes.len() {
-            msg.push_str(format!("\n{}", self.nodes[i].tree_node().desc(indent + 1)).as_str());
+            let disp_str = match self.nodes[i].tree_node() {
+                Some(node) => node.desc(indent + 1),
+                None => format!("{:?}", self.nodes[i]),
+            };
+            msg.push_str(format!("\n{}", disp_str).as_str());
         }
         msg
     }
@@ -225,11 +237,10 @@ impl CharsNode {
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
         let mut chs = Vec::<char>::new();
         loop {
-            let ch = chars.peek();
+            let (ch, ch1) = chars.peek_2();
             if ch.is_none() { break; }
             let ch = ch.unwrap();
             if ch == '\\' {
-                let ch1 = chars.peek();
                 if ch1.is_none() { return Err("Bad escape char".to_string()); }
                 let ch1 = ch1.unwrap();
                 if CharsNode::ESCAPE_CODES.contains(ch1) {
@@ -238,17 +249,19 @@ impl CharsNode {
                 let _ = chars.next();      // eat the "\" so the trailing character is put in the string
             } else if ch == '.' { break; } // another special character, use preceeding in string and leave this for next Node
             else if "?*+{".contains(ch) {  // it is a rep count - this cannot apply to a whole string, just a single character
-                chars.put_back(chs.pop().unwrap());   // TODO: can chs be empty?
+                if chs.len() > 1 {
+                    chars.put_back(chs.pop().unwrap());   // TODO: can chs be empty?
+                }
                 break;
             }
             chs.push(chars.next().unwrap());
         }
-        Ok(if chs.len() == 0 { Node::None }
+        Ok(if chs.is_empty() { Node::None }
            else {
                let limit_desc = if chs.len() == 1 { reps(chars)? } else { (1, 1, false) };
                Node::Chars(CharsNode {
                    string: chs.into_iter().collect(),
-                   limit_desc: limit_desc
+                   limit_desc
                })
            })
     }
@@ -263,7 +276,7 @@ impl SpecialCharNode {
         let ch = ch.unwrap();
         if ch != '.' { let _ = chars.next(); }
         let special = chars.next().unwrap();     // TODO: None
-        Ok(Node::SpecialChar(SpecialCharNode { special: special, limit_desc: reps(chars)?}))
+        Ok(Node::SpecialChar(SpecialCharNode { special, limit_desc: reps(chars)?}))
     }
 }
 
@@ -277,19 +290,17 @@ impl AndNode {
             if ch0.is_none() { return Err("Unterminated AND node".to_string()); }
             if ch0.unwrap() == '\\' && ch1.unwrap_or('x') == ')' { break; }
             let node = parse(chars)?;
-            if node.node_type() != NODE_NONE {
-                if node.node_type() == NODE_OR {
-                    AndNode::handle_or(&mut nodes, node);
-                } else {
-                    nodes.push(node);
-                }
+            match node.node_type() {
+                NODE_NONE => (),
+                NODE_OR => AndNode::handle_or(&mut nodes, node),
+                _ => nodes.push(node),
             }
         }
         // pop off terminating chars
         let _ = chars.next();
         let _ = chars.next();
-        Ok(if nodes.len() == 0 { Node::None }
-           else { Node::And(AndNode {nodes: nodes, limit_desc: reps(chars)?})})
+        Ok(if nodes.is_empty() { Node::None }
+           else { Node::And(AndNode {nodes, limit_desc: reps(chars)?})})
     }
     
     // OR is tricky: if the preceeding node in the AND is an OR the OrNode gets tossed and its
@@ -298,27 +309,31 @@ impl AndNode {
     fn handle_or(nodes: &mut Vec<Node>, mut node: Node) {
         // TODO: check for empty
         let mut prev = nodes.pop().unwrap();
-        if prev.node_type() == NODE_OR {
-            let prev_node = prev.or_mut_ref().unwrap();
-            prev_node.push(nodes.pop().unwrap());
-            nodes.push(prev);
-        } else {
-            let or_node = node.or_mut_ref().unwrap();
-            or_node.push(prev);
-            nodes.push(node);
+        match prev.node_type() {
+            NODE_OR => {
+                let prev_node = prev.or_mut_ref();
+                prev_node.push(node);
+                nodes.push(prev);
+            },
+            _ => {
+                let or_node = node.or_mut_ref();
+                or_node.push_front(prev);
+                nodes.push(node);
+            }
         }
     }
 }
 
 impl OrNode {
     fn push(&mut self, node: Node) { self.nodes.push(node); }
+    fn push_front(&mut self, node: Node) { self.nodes.insert(0, node); }
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
         let mut nodes = Vec::<Node>::new();
         let node = parse(chars)?;
         if !node.is_none() {
             nodes.push(node);
         }
-        Ok( Node::Or(OrNode {nodes: nodes,}))
+        Ok( Node::Or(OrNode {nodes,}))
     }
 }
 
@@ -341,13 +356,14 @@ impl RangeNode {
             let ch = ch.unwrap();
             if ch == ']' {
                 terminated = true;
+                let _ = chars.next();
                 break;
             }
             targets.push(RangeNode::parse_next(chars));
         }
         if !terminated { return Err("Unterminated Range".to_string()); }
-        Ok(if targets.len() == 0 { Node::None }
-           else { Node::Range( RangeNode {targets: targets, not: not, limit_desc: reps(chars)?}) })
+        Ok(if targets.is_empty() { Node::None }
+           else { Node::Range( RangeNode {targets, not, limit_desc: reps(chars)?}) })
     }
     
     fn parse_next(chars: &mut Peekable) -> Range {
@@ -440,11 +456,26 @@ pub fn parse_tree(input: &mut String) -> Result<Node, String> {
     chars.push('\\');
     chars.push(')');
     let mut outer_and = AndNode::parse_node(&mut chars)?;
-    let and_node = outer_and.and_mut_ref().unwrap();
+    let and_node = outer_and.and_mut_ref();
     and_node.push(Node::Success);
     Ok(outer_and)
 }
-                  
+
+//////////////////////////////////////////////////////////////////
+//
+// walk
+//
+// Main functions to walk the regexp tree to find a match
+//
+//////////////////////////////////////////////////////////////////
+#[derive(Debug)]
+pub struct Match {
+
+}
+
+pub fn walk_tree(tree: Node, text: &String) -> Option<Match> {
+    None
+}
 //////////////////////////////////////////////////////////////////
 //
 // Helper functions
@@ -455,17 +486,16 @@ pub fn parse_tree(input: &mut String) -> Result<Node, String> {
 // These functions parse the reps option from the re source
 //
 fn reps(chars: &mut Peekable) -> Result<(usize, usize, bool), String> {
-    let (min, max): (usize, usize);
     let next = chars.next();
     if next.is_none() { return Ok((1, 1, false)); }
     let next = next.unwrap();
-    match next {
-        '*' => (min, max) = (0, EFFECTIVELY_INFINITE),
-        '+' => (min, max) = (1, EFFECTIVELY_INFINITE),
-        '?' => (min, max) = (0, 1),
-        '{' => (min, max) = custom_rep(chars)?,
+    let (min, max): (usize, usize) = match next {
+        '*' => (0, EFFECTIVELY_INFINITE),
+        '+' => (1, EFFECTIVELY_INFINITE),
+        '?' => (0, 1),
+        '{' => custom_rep(chars)?,
         _ => { chars.put_back(next); return Ok((1, 1, false)) },
-    }
+    };
     let qmark = chars.peek();
     let lazy = qmark.unwrap_or('x') == '?';
     if lazy { let _ = chars.next(); }
@@ -497,7 +527,7 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
         let digit = chars.next();
         if digit.is_none() { break; }
         let digit = digit.unwrap();
-        if digit < '0' || digit > '9' {
+        if !('0'..='9').contains(&digit) {
             chars.put_back(digit);
             break;
         }
@@ -525,6 +555,8 @@ fn pad(x: usize) -> String {
 // It also has progress(), a sanity check to catch suspicious behavior, like infinite loops or overuse of peeking
 //
 //////////////////////////////////////////////////////////////////
+
+#[derive(Debug)]
 pub struct Peekable<'a> {
     chars: Chars<'a>,
     peeked: Vec<char>,
@@ -533,7 +565,7 @@ pub struct Peekable<'a> {
 }
 
 impl<'a> Peekable<'a> {
-    fn new(string: &String) -> Peekable { Peekable { chars: string.chars(), peeked: Vec::<char>::new(), trailer: Vec::<char>::new(), progress_check: 1} }
+    fn new(string: &str) -> Peekable { Peekable { chars: string.chars(), peeked: Vec::<char>::new(), trailer: Vec::<char>::new(), progress_check: 1} }
 
     pub fn next(&mut self) -> Option<char> {
         if !self.peeked.is_empty() { Some(self.peeked.remove(0)) }
@@ -543,9 +575,8 @@ impl<'a> Peekable<'a> {
     // peek() looks at the next character in the pipeline. If called multiple times it returns the same value
     pub fn peek(&mut self) -> Option<char> {
         if self.peeked.is_empty() {
-            let ch = self.next_i();
-            if ch.is_none() { return None; }
-            self.peeked.push(ch.unwrap());
+            let ch = self.next_i()?;
+            self.peeked.push(ch);
         }
         Some(self.peeked[0])
     }
@@ -587,7 +618,7 @@ impl<'a> Peekable<'a> {
     fn next_i(&mut self) -> Option<char> {
         let mut ret = self.chars.next();
         if ret.is_none() {
-            ret = if self.trailer.len() > 0 { Some(self.trailer.remove(0)) } else { None };
+            ret = if self.trailer.is_empty() { None } else { Some(self.trailer.remove(0)) };
         }
         self.progress_check += 1;
         ret
