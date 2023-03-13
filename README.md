@@ -8,6 +8,8 @@ That leads into this second project. I wrote a [regexp search program in C](http
 
 ### _The current state_
 
-Builds, not really tested. It has already been through two iterations, the first enclosing the **Node** structs in **Box**es, but that ran into problems because I couldn't extract the full structures from the **dyn Node** type. I decided to replace the **Box** container with **enum** to wrap the **Node* structs. This (seems to) work - I was able to make code to extract a reference to the structs from the enums, though I needed help from rust-lang.org to get mutable refs out (I just couldn't get the right combination of mut's, &'s, and the match statemnt)
+The parser runs fine, and there are tests to handle some simple cases. More need to be added, but most testing will do full searching, the parser tree tests are mainly sanity tests to point the way if something is really wrong.
+
+The next step is to walk the tree. I'm pretty sur ehow to do it, but still need to think a little bit about how to return the state when a particular node succeeds.
 
 To me this feels much more like a Rust program than Tetrii did. In particular, it starts to make use of features like traits, enums, and distinguishes between mutable and immutable. I'd be curious to hear what others think.
