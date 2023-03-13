@@ -35,7 +35,7 @@ impl Config {
 }
 
 fn main() {
-    let mut config = match Config::get() {
+    let config = match Config::get() {
         Ok(cfg) => cfg,
         Err(msg) => {
             println!("{}", msg);
@@ -43,7 +43,7 @@ fn main() {
         }
     };
     // execution starts
-    let tree = match regexp::parse_tree(&mut config.re) {
+    let tree = match regexp::parse_tree(&config.re) {
         Ok(node) => node,
         Err(msg) => {
             println!("Error parsing regexp: {}", msg);

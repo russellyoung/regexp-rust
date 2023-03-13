@@ -40,7 +40,62 @@ impl Node {
             Node::None            => NODE_NONE,
         }
     }
-        
+
+    //
+    // Following are to fix special cases in building the tree. If I could redesign regexps they wouldn't be needed, but
+    // to get the right behavior sometimes special tweaking is needed.
+    //
+    
+    // This is to handle the case "XXX\|abcd" where a string of chars follows an AND. Only the first char should bind to the
+    // OR. This method returns theany extra characters to the queue. If the Node is not Chars it does nothing.
+    fn chars_after_or(&mut self, chars: &mut Peekable) {
+        if let Node::Chars(chars_node) = self {
+            while chars_node.string.len() > 1 {
+                chars.put_back(chars_node.string.pop().unwrap());
+            }
+        }
+    }
+
+    // For the case abc\|XXX, break the preceding "abc" into "ab" and "c" since only the "c" binds with the OR
+    fn chars_before_or(nodes: &mut Vec<Node>) {
+        let mut prev = nodes.pop().unwrap();
+        if prev.node_type() == NODE_CHARS {
+            let chars_node = prev.chars_mut_ref();
+            if chars_node.string.len() > 1 {
+                let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), limit_desc: (1, 1, false)});
+                nodes.push(prev);
+                nodes.push(new_node);
+            }
+        } else {
+            nodes.push(prev);
+        }
+    }
+
+    // This handles the case where an OR is being inserted ino an AND.
+    //  - If the preceding node is an OR this OR node gets discarded and its condition is appended to the
+    //    existing one.
+    //  - If the preceding node is not an OR then that node is removed from the AND list and inserted as the
+    //    first element in the OR list.
+    //  - In addition, if the preceding node is CHARS and its length is >1 it needs to be split, since the
+    //    OR only binds a single character
+    fn or_into_and(mut self, nodes: &mut Vec<Node>) {
+        // TODO: check for empty
+        Node::chars_before_or(nodes);
+        let mut prev = nodes.pop().unwrap();
+        match prev.node_type() {
+            NODE_OR => {
+                let prev_node = prev.or_mut_ref();
+                prev_node.push(self);
+                nodes.push(prev);
+            },
+            _ => {
+                let or_node = self.or_mut_ref();
+                or_node.push_front(prev);
+                nodes.push(self);
+            }
+        }
+    }
+
     //
     // Access Node content structs
     //
@@ -79,6 +134,12 @@ impl Node {
         match self {
             Node::And(and_node) => and_node,
             _ => panic!("Attempting to get mut ref to AndNode from wrong Node type")
+        }
+    }
+    fn chars_mut_ref(&mut self)->&mut CharsNode {
+        match self {
+            Node::Chars(chars_node) => chars_node,
+            _ => panic!("Attempting to get mut ref to CharsNode from wrong Node type")
         }
     }
 }
@@ -253,7 +314,7 @@ impl CharsNode {
                         break;
                     }
                 },
-                (Some(ch0), None) => { return Err("Bad escape char".to_string()); },
+                (Some(_ch0), None) => { return Err("Bad escape char".to_string()); },
                 _ => { break; }
             }
             chs.push(chars.next().unwrap());
@@ -275,7 +336,7 @@ impl SpecialCharNode {
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
         let special = if let Some(ch) = chars.next() {
             if ch == '.' { '.' }
-            else if let Some(ch1) = chars.peek() { chars.next().unwrap() }
+            else if let Some(_ch1) = chars.peek() { chars.next().unwrap() }   // ch1 is next(), doing it this way gets the same value and pops it off
             else { return Ok(Node::None); }
         } else { return Ok(Node::None); };
         Ok(Node::SpecialChar(SpecialCharNode { special, limit_desc: reps(chars)?}))
@@ -294,7 +355,7 @@ impl AndNode {
             let node = parse(chars)?;
             match node.node_type() {
                 NODE_NONE => (),
-                NODE_OR => AndNode::handle_or(&mut nodes, node),
+                NODE_OR => node.or_into_and(&mut nodes),
                 _ => nodes.push(node),
             }
         }
@@ -304,26 +365,7 @@ impl AndNode {
         Ok(if nodes.is_empty() { Node::None }
            else { Node::And(AndNode {nodes, limit_desc: reps(chars)?})})
     }
-    
-    // OR is tricky: if the preceeding node in the AND is an OR the OrNode gets tossed and its
-    // contents gets added to the previous OR. If the previous node is anything else it it is
-    // moved to the first position in the OrNode and the OrNode replaces it in the AndNode list
-    fn handle_or(nodes: &mut Vec<Node>, mut node: Node) {
-        // TODO: check for empty
-        let mut prev = nodes.pop().unwrap();
-        match prev.node_type() {
-            NODE_OR => {
-                let prev_node = prev.or_mut_ref();
-                prev_node.push(node);
-                nodes.push(prev);
-            },
-            _ => {
-                let or_node = node.or_mut_ref();
-                or_node.push_front(prev);
-                nodes.push(node);
-            }
-        }
-    }
+ 
 }
 
 impl OrNode {
@@ -331,8 +373,10 @@ impl OrNode {
     fn push_front(&mut self, node: Node) { self.nodes.insert(0, node); }
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
         let mut nodes = Vec::<Node>::new();
-        let node = parse(chars)?;
+        let mut node = parse(chars)?;
         if !node.is_none() {
+            // only the first char in a character string should be in an OR
+            node.chars_after_or(chars);
             nodes.push(node);
         }
         Ok( Node::Or(OrNode {nodes,}))
