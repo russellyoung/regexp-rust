@@ -1,10 +1,12 @@
 use std::str::Chars;
+#[cfg(test)]
+mod tests;
 
 const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
 const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
 const TAB_INDENT:usize = 2;                     // indent in Debug display
 
-//#[derive(PartialEq)]
+#[derive(PartialEq)]
 pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Range(RangeNode), Success, None, }
 use core::fmt::Debug;
 impl Debug for Node {
@@ -91,28 +93,28 @@ impl Node {
 
 // handles strings of regular characters
 // Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
-#[derive(Default)]
+#[derive(PartialEq, Default)]
 pub struct CharsNode {
     limit_desc: (usize, usize, bool),
     string: String,
 }
 
 // handles special characters like ".", \N, etc.
-#[derive(Default)]
+#[derive(PartialEq, Default)]
 pub struct SpecialCharNode {
     limit_desc: (usize, usize, bool),
     special: char,
 }
 
 // handles AND (sequential) matches
-#[derive(Default)]
+#[derive(PartialEq, Default)]
 pub struct AndNode {
     limit_desc: (usize, usize, bool),
     nodes: Vec<Node>,
 }
 
 // handles A\|B style matches
-#[derive(Default)]
+#[derive(PartialEq, Default)]
 pub struct OrNode {
     // No reps for OR node, to repeat it has to be surrounded by an AND
     // limit_desc: (usize, usize, bool),
@@ -120,7 +122,7 @@ pub struct OrNode {
 }
 
 // handles [a-z] style matches
-#[derive(Default)]
+#[derive(PartialEq, Default)]
 pub struct RangeNode {
     limit_desc: (usize, usize, bool),
     targets: Vec<Range>,
@@ -237,22 +239,22 @@ impl CharsNode {
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
         let mut chs = Vec::<char>::new();
         loop {
-            let (ch, ch1) = chars.peek_2();
-            if ch.is_none() { break; }
-            let ch = ch.unwrap();
-            if ch == '\\' {
-                if ch1.is_none() { return Err("Bad escape char".to_string()); }
-                let ch1 = ch1.unwrap();
-                if CharsNode::ESCAPE_CODES.contains(ch1) {
-                    break;     // this is an escape character, break and use the predecing characters
-                }
-                let _ = chars.next();      // eat the "\" so the trailing character is put in the string
-            } else if ch == '.' { break; } // another special character, use preceeding in string and leave this for next Node
-            else if "?*+{".contains(ch) {  // it is a rep count - this cannot apply to a whole string, just a single character
-                if chs.len() > 1 {
-                    chars.put_back(chs.pop().unwrap());   // TODO: can chs be empty?
-                }
-                break;
+            match chars.peek_2() {
+                (Some(ch0), Some(ch1)) => {
+                    if ch0 == '.' { break; }
+                    if ch0 == '\\' {
+                        if "()|".contains(ch1) { break; }
+                        if CharsNode::ESCAPE_CODES.contains(ch1) { break; }
+                        let _ = chars.next();    // pop off the '/'
+                    } else if "?*+{".contains(ch0) {  // it is a rep count - this cannot apply to a whole string, just a single character
+                        if chs.len() > 1 {           // so return the previous character to the stream and register the rest
+                            chars.put_back(chs.pop().unwrap());   // TODO: can chs be empty?
+                        }
+                        break;
+                    }
+                },
+                (Some(ch0), None) => { return Err("Bad escape char".to_string()); },
+                _ => { break; }
             }
             chs.push(chars.next().unwrap());
         }
@@ -271,11 +273,11 @@ impl SpecialCharNode {
     // called with pointer at a special character. Char can be '.' or "\*". For now I'm assuming this only gets called with special
     // sequences at bat, so no checking is done.
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
-        let ch = chars.peek();
-        if ch.is_none() { return Ok(Node::None); }
-        let ch = ch.unwrap();
-        if ch != '.' { let _ = chars.next(); }
-        let special = chars.next().unwrap();     // TODO: None
+        let special = if let Some(ch) = chars.next() {
+            if ch == '.' { '.' }
+            else if let Some(ch1) = chars.peek() { chars.next().unwrap() }
+            else { return Ok(Node::None); }
+        } else { return Ok(Node::None); };
         Ok(Node::SpecialChar(SpecialCharNode { special, limit_desc: reps(chars)?}))
     }
 }
@@ -383,6 +385,7 @@ impl RangeNode {
     
 // used to mark ranges for RangeNode
 // TODO: maybe combine single chars into String so can use contains() to ge all at once?
+#[derive(PartialEq, Debug)]
 enum Range {SingleChar(char), SpecialChar(char), Range(char, char)}
 /*
 impl Debug for Range {
@@ -439,6 +442,8 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
                     OrNode::parse_node(chars)
                 }
             }
+        } else if ch0 == '.' {
+            SpecialCharNode::parse_node(chars)
         } else {
             CharsNode::parse_node(chars)
         }?)
@@ -448,7 +453,7 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
 // Main entry point for parsing tree
 //
 // Wraps the in put with "\(...\)" so it becomes an AND node, and sticks the SUCCESS node on the end when done
-pub fn parse_tree(input: &mut str) -> Result<Node, String> {
+pub fn parse_tree(input: &str) -> Result<Node, String> {
     // wrap the string in "\(...\)" to make it an implicit AND node
     let mut chars = Peekable::new(input);
     chars.push('\\');
