@@ -7,7 +7,7 @@ const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap
 const TAB_INDENT:usize = 2;                     // indent in Debug display
 
 #[derive(PartialEq)]
-pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Range(RangeNode), Success, None, }
+pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Matching(MatchingNode), Success, None, }
 use core::fmt::Debug;
 impl Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -19,13 +19,13 @@ impl Debug for Node {
     }
 }
 
-const NODE_CHARS:   usize = 0;
-const NODE_SPEC:    usize = 1;
-const NODE_AND:     usize = 2;
-const NODE_OR:      usize = 3;
-const NODE_RANGE:   usize = 4;
-const NODE_SUCCESS: usize = 5;
-const NODE_NONE:    usize = 6;
+const NODE_CHARS:    usize = 0;
+const NODE_SPEC:     usize = 1;
+const NODE_AND:      usize = 2;
+const NODE_OR:       usize = 3;
+const NODE_MATCHING: usize = 4;
+const NODE_SUCCESS:  usize = 5;
+const NODE_NONE:     usize = 6;
 
 impl Node {
     fn is_none(&self) -> bool { self.node_type() == NODE_NONE }
@@ -35,7 +35,7 @@ impl Node {
             Node::SpecialChar(_a) => NODE_SPEC,
             Node::And(_a)         => NODE_AND,
             Node::Or(_a)          => NODE_OR,
-            Node::Range(_a)       => NODE_RANGE,
+            Node::Matching(_a)    => NODE_MATCHING,
             Node::Success         => NODE_SUCCESS,
             Node::None            => NODE_NONE,
         }
@@ -108,7 +108,7 @@ impl Node {
             Node::SpecialChar(a) => Some(a),
             Node::And(a)         => Some(a),
             Node::Or(a)          => Some(a),
-            Node::Range(a)       => Some(a),
+            Node::Matching(a)    => Some(a),
             Node::Success        => None,
             Node::None           => None,
         }
@@ -184,9 +184,9 @@ pub struct OrNode {
 
 // handles [a-z] style matches
 #[derive(PartialEq, Default)]
-pub struct RangeNode {
+pub struct MatchingNode {
     limit_desc: (usize, usize, bool),
-    targets: Vec<Range>,
+    targets: Vec<Matching>,
     not: bool,
 }
 
@@ -202,24 +202,24 @@ pub trait TreeNode {
     fn limits(&self) -> (usize, usize, bool);
     fn desc(&self, indent: usize) -> String;
     fn limit_str(&self) -> String {
-        let limit = self.limits();
+        let limits = self.limits();
         let code = 
-            if limit.0 == 0 {
-                if limit.1 == 1 { "?".to_string() }
-                else if limit.1 >= EFFECTIVELY_INFINITE { "*".to_string() }
-                else { format!("{{0,{}}}", limit.1) }
-            } else if limit.0 == 1 {
-                if limit.1 >= EFFECTIVELY_INFINITE { "+".to_string() }
-                else if limit.1 == 1 { "".to_string() }
-                else { format!("{{1,{}}}", limit.1) }
-            } else if limit.0 == limit.1 {
-                format!("{{{}}}", limit.0)
-            } else if limit.1 < EFFECTIVELY_INFINITE {
-                format!("{{{},{}}}", limit.0, limit.1)
+            if limits.0 == 0 {
+                if limits.1 == 1 { "?".to_string() }
+                else if limits.1 >= EFFECTIVELY_INFINITE { "*".to_string() }
+                else { format!("{{0,{}}}", limits.1) }
+            } else if limits.0 == 1 {
+                if limits.1 >= EFFECTIVELY_INFINITE { "+".to_string() }
+                else if limits.1 == 1 { "".to_string() }
+                else { format!("{{1,{}}}", limits.1) }
+            } else if limits.0 == limits.1 {
+                format!("{{{}}}", limits.0)
+            } else if limits.1 < EFFECTIVELY_INFINITE {
+                format!("{{{},{}}}", limits.0, limits.1)
             } else {
-                format!("{{{},}}", limit.0)
+                format!("{{{},}}", limits.0)
             };
-        format!("{}{}", code, if limit.2 {" lazy" } else { "" })
+        format!("{}{}", code, if limits.2 {" lazy" } else { "" })
     }
 }
 
@@ -272,12 +272,12 @@ impl TreeNode for OrNode {
     }
 }
 
-impl TreeNode for RangeNode {
+impl TreeNode for MatchingNode {
     fn limits(&self) -> (usize, usize, bool) { self.limit_desc }
     fn desc(&self, indent: usize) -> String {
         let target_str = self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join("");
         let not = if self.not { "^" } else { "" };
-        format!("{}RangeNode [{}{}]{}", pad(indent), not, target_str, self.limit_str(), )
+        format!("{}MatchingNode [{}{}]{}", pad(indent), not, target_str, self.limit_str(), )
     }
 }
 
@@ -302,7 +302,7 @@ impl CharsNode {
         loop {
             match chars.peek_2() {
                 (Some(ch0), Some(ch1)) => {
-                    if ch0 == '.' { break; }
+                    if ch0 == '.' || ch0 == '[' { break; }
                     if ch0 == '\\' {
                         if "()|".contains(ch1) { break; }
                         if CharsNode::ESCAPE_CODES.contains(ch1) { break; }
@@ -383,10 +383,11 @@ impl OrNode {
     }
 }
 
-impl RangeNode {
+impl MatchingNode {
+    fn push(&mut self, matching: Matching) { self.targets.push(matching); }
+    
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
-        let mut terminated = false;
-        let mut targets = Vec::<Range>::new();
+        let mut targets = Vec::<Matching>::new();
         let mut not = false;
         if let Some(ch) = chars.peek() {
             if ch == '^' {
@@ -395,60 +396,72 @@ impl RangeNode {
             }
         }
         loop {
-            let ch = chars.peek();
-            if ch.is_none() { break; }
-            let ch = ch.unwrap();
-            if ch == ']' {
-                terminated = true;
-                let _ = chars.next();
-                break;
+            match chars.peek() {
+                None => break,
+                Some(ch) => {
+                    if ch == ']' { break; }
+                    let target = Matching::parse_next(chars)?; 
+                    if target != Matching::Empty {targets.push(target) }
+                },
             }
-            targets.push(RangeNode::parse_next(chars));
         }
-        if !terminated { return Err("Unterminated Range".to_string()); }
+        
+        // eiher None or ']'
+        if let Some(ch) = chars.next() { if ch != ']' {return Err("Unterminated Matching".to_string()); } };
         Ok(if targets.is_empty() { Node::None }
-           else { Node::Range( RangeNode {targets, not, limit_desc: reps(chars)?}) })
+           else { Node::Matching( MatchingNode {targets, not, limit_desc: reps(chars)?}) })
     }
     
-    fn parse_next(chars: &mut Peekable) -> Range {
-        let ch0 = chars.next().unwrap();     // empty case is handled in caller
-        let ch1 = chars.peek().unwrap_or('x');
-        if ch0 == '\\' {
-            let _ = chars.next();
-            Range::SpecialChar(ch1)
-        } else if ch1 == '-' {
-            let _ = chars.next();
-            if let Some(ch2) = chars.next() {
-                Range::Range(ch0, ch2)
-            } else { Range::SingleChar('-') }
-        } else {
-            Range::SingleChar(ch0)
-        }
-    }    
 }
-    
-// used to mark ranges for RangeNode
+        
+// used to mark ranges for MatchingNode
 // TODO: maybe combine single chars into String so can use contains() to ge all at once?
 #[derive(PartialEq, Debug)]
-enum Range {SingleChar(char), SpecialChar(char), Range(char, char)}
+enum Matching {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
+
 /*
-impl Debug for Range {
+impl Debug for Matching {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Range::Range(x, y) => write!(f, "[{} - {}]", x, y),
-            Range::SingleChar(x) => write!(f, "{}", x),
-            Range::SpecialChar(x) => write!(f, "\\{}", x),
+            Matching::Range(ch0, ch1) => write!(f, "[{} - {}]", ch0, ch1),
+            Matching::RegularChars(string) => write!(f, "{}", string),
+            Matching::SpecialChar(ch) => write!(f, "\\{}", ch),
         }
     }
 }
 */
-impl Range {
+impl Matching {
     fn desc(&self) -> String {
         match self {
-            Range::SingleChar(x) => format!("{}", x),
-            Range::SpecialChar(x) => format!("\\{}", x),
-            Range::Range(x, y) => format!("{}-{}", x, y),
+            Matching::RegularChars(string) => string.to_string(),
+            Matching::SpecialChar(ch) => format!("\\{}", ch),
+            Matching::Range(ch0, ch1) => format!("{}-{}", ch0, ch1),
+            Matching::Empty => "*EMPTY*".to_string(),
         }
+    }
+    fn parse_next(chars: &mut Peekable) -> Result<Matching, String> {
+        Ok(match chars.peek_2() {
+            (Some(ch0), Some(ch1)) => {
+                if ch1 == '-'{
+                    Matching::Range(chars.next().unwrap(), (chars.next(), chars.next().unwrap()).1)
+                } else if ch0 == '\\' {
+                    Matching::SpecialChar((chars.next(), chars.next()).1.unwrap())
+                } else {
+                    let mut string = "".to_string();
+                    loop {
+                        match chars.peek_2() {
+                            (Some(ch0), Some(ch1)) => {
+                                if ch0 == ']' || ch0 == '\\' || ch1 == '-' { break; }
+                                string.push(chars.next().unwrap());
+                            },
+                            _ => { return Err("Unterminated matching block".to_string()); },
+                        }
+                    }
+                    if string.is_empty() {Matching::Empty} else {Matching::RegularChars(string)}
+                }
+            }
+            _ => Matching::Empty,
+        })
     }
 }
 
@@ -469,7 +482,7 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
     Ok(
         if ch0 == '[' {
             let _ = chars.next();
-            RangeNode::parse_node(chars)
+            MatchingNode::parse_node(chars)
         } else if ch0 == '\\' {
             if ch1 != '(' && ch1 != '|' {
                 if ch1 == '\\' {
@@ -589,7 +602,6 @@ fn pad(x: usize) -> String {
     let pad = TAB_INDENT*x;
     format!("{:pad$}", "")
 }
-
 
 //////////////////////////////////////////////////////////////////
 //

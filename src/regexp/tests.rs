@@ -24,8 +24,11 @@ fn make_or() -> Node {
     Node::Or(OrNode{nodes: Vec::<Node>::new(), })
 }
 
-fn make_range(not: bool, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Range(RangeNode{not, targets: Vec::<Range>::new(), limit_desc: (min, max, lazy)})
+fn make_matching(not: bool, targets: Vec<Matching>, min: usize, max: usize, lazy: bool) -> Node {
+    Node::Matching(MatchingNode{not, targets, limit_desc: (min, max, lazy)})
+}
+fn push_matchings(matching_node: &mut MatchingNode, matchings: &mut Vec<Matching>) {
+    matching_node.targets.append(matchings);
 }
 
 impl Node {
@@ -100,3 +103,20 @@ fn or_with_chars_bug() {
     node.push(Node::Success);
     assert_eq!(node, parse_tree(r"abc\|def").unwrap());
 }
+
+#[test]
+fn matching_basic() {
+    let mut node = make_and(1, 1, false);
+    node.push(make_chars_string("ab"));
+    let targets = vec![Matching::RegularChars("cde".to_string()),];
+    node.push(make_matching(false, targets, 0, EFFECTIVELY_INFINITE, false));
+    node.push(make_chars_string("fg"));
+    let targets = vec![Matching::RegularChars("h".to_string()),
+                       Matching::Range('i', 'k'),
+                       Matching::RegularChars("lm".to_string()),
+                       Matching::SpecialChar('N')];
+    node.push(make_matching(true, targets, 1, 1, false));
+    node.push(Node::Success);
+    assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\N]").unwrap());
+}
+
