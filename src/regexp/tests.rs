@@ -45,7 +45,7 @@ impl Node {
 fn test_string_simple() {
     let mut node = make_and(1, 1, false);
     node.push(make_chars_string("abcd"));
-    node.push(Node::Success);
+//    node.push(Node::Success);
     assert_eq!(node, parse_tree("abcd").unwrap());
 }
 
@@ -58,7 +58,7 @@ fn test_string_embedded_reps() {
     node.push(make_chars_single("f", 1, EFFECTIVELY_INFINITE, false));
     node.push(make_chars_string("gh", ));
     node.push(make_chars_single("i", 0, EFFECTIVELY_INFINITE, false));
-    node.push(Node::Success);
+//    node.push(Node::Success);
     assert_eq!(node, parse_tree("abc?def+ghi*").unwrap());
 }
               
@@ -72,7 +72,7 @@ fn test_string_embedded_reps_lazy() {
     node.push(make_chars_string("gh", ));
     node.push(make_chars_single("i", 0, EFFECTIVELY_INFINITE, true));
     node.push(make_chars_string("jk", ));
-    node.push(Node::Success);
+//    node.push(Node::Success);
     assert_eq!(node, parse_tree("abc??def+?ghi*?jk").unwrap());
 }
               
@@ -86,7 +86,7 @@ fn test_special_in_string() {
     node.push(make_chars_string("gh", ));
     node.push(make_special('.', 1, 3, false));
     node.push(make_chars_string("ij", ));
-    node.push(Node::Success);
+//    node.push(Node::Success);
     println!("{:#?}", parse_tree(r"abc.def\N?gh").unwrap());
     assert_eq!(node, parse_tree(r"abc.def\N?gh.{1,3}ij").unwrap());
 }
@@ -100,7 +100,7 @@ fn or_with_chars_bug() {
     or_node.push(make_chars_string("d"));
     node.push(or_node);
     node.push(make_chars_string("ef"));
-    node.push(Node::Success);
+//    node.push(Node::Success);
     assert_eq!(node, parse_tree(r"abc\|def").unwrap());
 }
 
@@ -116,7 +116,7 @@ fn matching_basic() {
                        Matching::RegularChars("lm".to_string()),
                        Matching::SpecialChar('N')];
     node.push(make_matching(true, targets, 1, 1, false));
-    node.push(Node::Success);
+//    node.push(Node::Success);
     assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\N]").unwrap());
 }
 

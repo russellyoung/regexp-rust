@@ -1,31 +1,32 @@
-use std::str::Chars;
+pub mod walk;
 #[cfg(test)]
 mod tests;
+
+use std::str::Chars;
 
 const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
 const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
 const TAB_INDENT:usize = 2;                     // indent in Debug display
 
 #[derive(PartialEq)]
-pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Matching(MatchingNode), Success, None, }
+pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Matching(MatchingNode), None, }
 use core::fmt::Debug;
 impl Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", match self {
-            Node::Success => "Success".to_string(),
             Node::None => "None".to_string(),
             _ => self.tree_node().unwrap().desc(0)
         })
     }
 }
 
-const NODE_CHARS:    usize = 0;
-const NODE_SPEC:     usize = 1;
-const NODE_AND:      usize = 2;
-const NODE_OR:       usize = 3;
-const NODE_MATCHING: usize = 4;
-const NODE_SUCCESS:  usize = 5;
-const NODE_NONE:     usize = 6;
+pub const NODE_CHARS:    usize = 0;
+pub const NODE_SPEC:     usize = 1;
+pub const NODE_AND:      usize = 2;
+pub const NODE_OR:       usize = 3;
+pub const NODE_MATCHING: usize = 4;
+//pub const NODE_SUCCESS:  usize = 5;
+pub const NODE_NONE:     usize = 6;
 
 impl Node {
     fn is_none(&self) -> bool { self.node_type() == NODE_NONE }
@@ -36,11 +37,19 @@ impl Node {
             Node::And(_a)         => NODE_AND,
             Node::Or(_a)          => NODE_OR,
             Node::Matching(_a)    => NODE_MATCHING,
-            Node::Success         => NODE_SUCCESS,
             Node::None            => NODE_NONE,
         }
     }
 
+    fn walk<'a>(&'a self, string: &'a str) -> walk::Path<'a> {
+        match self {
+            Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, string),
+            Node::SpecialChar(special_node) => walk::SpecialStep::walk(special_node, string),
+            Node::Matching(matching_node) => walk::MatchingStep::walk(matching_node, string),
+            Node::And(and_node) => walk::AndStep::walk(and_node, string),
+            _ => panic!("TODO")
+        }
+    }
     //
     // Following are to fix special cases in building the tree. If I could redesign regexps they wouldn't be needed, but
     // to get the right behavior sometimes special tweaking is needed.
@@ -109,7 +118,6 @@ impl Node {
             Node::And(a)         => Some(a),
             Node::Or(a)          => Some(a),
             Node::Matching(a)    => Some(a),
-            Node::Success        => None,
             Node::None           => None,
         }
     }
@@ -120,6 +128,12 @@ impl Node {
     fn or_ref(&self) -> &OrNode {
         match self {
             Node::Or(node) => node,
+            _ => panic!("Attempting to get ref to OrNode from wrong Node type")
+        }
+    }
+    fn chars_ref(&self) -> &CharsNode {
+        match self {
+            Node::Chars(node) => node,
             _ => panic!("Attempting to get ref to OrNode from wrong Node type")
         }
     }
@@ -143,7 +157,7 @@ impl Node {
         }
     }
 }
-    
+
 //
 // Treenodes are the structs used to build the parse tree. It is constructed in the first pass and then used
 // to walk the search string in a second pass
@@ -154,28 +168,28 @@ impl Node {
 
 // handles strings of regular characters
 // Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
-#[derive(PartialEq, Default)]
+#[derive(PartialEq, Default, Debug)]
 pub struct CharsNode {
     limit_desc: (usize, usize, bool),
     string: String,
 }
 
 // handles special characters like ".", \N, etc.
-#[derive(PartialEq, Default)]
+#[derive(PartialEq, Default, Debug)]
 pub struct SpecialCharNode {
     limit_desc: (usize, usize, bool),
     special: char,
 }
 
 // handles AND (sequential) matches
-#[derive(PartialEq, Default)]
+#[derive(PartialEq, Default, Debug)]
 pub struct AndNode {
     limit_desc: (usize, usize, bool),
     nodes: Vec<Node>,
 }
 
 // handles A\|B style matches
-#[derive(PartialEq, Default)]
+#[derive(PartialEq, Default, Debug)]
 pub struct OrNode {
     // No reps for OR node, to repeat it has to be surrounded by an AND
     // limit_desc: (usize, usize, bool),
@@ -183,7 +197,7 @@ pub struct OrNode {
 }
 
 // handles [a-z] style matches
-#[derive(PartialEq, Default)]
+#[derive(PartialEq, Default, Debug)]
 pub struct MatchingNode {
     limit_desc: (usize, usize, bool),
     targets: Vec<Matching>,
@@ -199,8 +213,8 @@ pub struct MatchingNode {
 //////////////////////////////////////////////////////////////////
 
 pub trait TreeNode {
-    fn limits(&self) -> (usize, usize, bool);
     fn desc(&self, indent: usize) -> String;
+    fn limits(&self) -> (usize, usize, bool);
     fn limit_str(&self) -> String {
         let limits = self.limits();
         let code = 
@@ -221,6 +235,9 @@ pub trait TreeNode {
             };
         format!("{}{}", code, if limits.2 {" lazy" } else { "" })
     }
+    // looks for a single match, does not care about repeats
+    fn matches<'a>(&self, string: &'a str) -> bool { string == "" }
+
 }
 
 // CharsNode keeps a string of consecuive characters to look for. Really, it is like an AndNode where each node has a single
@@ -229,6 +246,7 @@ pub trait TreeNode {
 impl TreeNode for CharsNode {
     fn limits(&self) -> (usize, usize, bool) { self.limit_desc }
     fn desc(&self, indent: usize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limit_str())}
+    fn matches<'a>(&self, string: &'a str) -> bool { string.starts_with(&self.string) }
 }
 
 impl TreeNode for SpecialCharNode {
@@ -238,6 +256,14 @@ impl TreeNode for SpecialCharNode {
         let slash = if self.special == '.' { "" } else { "\\" };
         format!("{}SpecialCharNode: '{}{}'", pad(indent), slash, self.special)
     }
+
+    fn matches(&self, string: &str) -> bool {
+        match string.chars().next() {
+            Some(ch) => self.match_char(ch),
+            None => false
+        }
+    }
+
 }
 
     
@@ -341,6 +367,14 @@ impl SpecialCharNode {
         } else { return Ok(Node::None); };
         Ok(Node::SpecialChar(SpecialCharNode { special, limit_desc: reps(chars)?}))
     }
+
+    fn match_char(&self, ch: char) -> bool {
+        match self.special {
+            'N' => "0123456789".contains(ch),
+            // TODO: other matches
+            _ => false
+        }
+    }
 }
 
 impl AndNode {
@@ -412,6 +446,14 @@ impl MatchingNode {
            else { Node::Matching( MatchingNode {targets, not, limit_desc: reps(chars)?}) })
     }
     
+    fn matches(&self, string: &str) -> bool {
+        match string.chars().next() {
+            Some(ch) => self.match_char(ch),
+            None => false
+        }
+    }
+    
+    fn match_char(&self, ch: char) -> bool { self.not != self.targets.iter().any(move |x| x.matches(ch)) }
 }
         
 // used to mark ranges for MatchingNode
@@ -429,7 +471,8 @@ impl Debug for Matching {
         }
     }
 }
-*/
+ */
+
 impl Matching {
     fn desc(&self) -> String {
         match self {
@@ -462,6 +505,14 @@ impl Matching {
             }
             _ => Matching::Empty,
         })
+    }
+    fn matches(&self, ch: char) -> bool {
+        match self {
+            Matching::RegularChars(string) => string.contains(ch),
+            Matching::SpecialChar(_ch) => false,   // TODO
+            Matching::Range(ch0, ch1) => *ch0 <= ch && ch <= *ch1,
+            Matching::Empty => false,
+        }
     }
 }
 
@@ -512,28 +563,35 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
 // Wraps the in put with "\(...\)" so it becomes an AND node, and sticks the SUCCESS node on the end when done
 pub fn parse_tree(input: &str) -> Result<Node, String> {
     // wrap the string in "\(...\)" to make it an implicit AND node
-    let mut chars = Peekable::new(input);
+    let anchor_front = input.chars().next().unwrap() == '$';
+    let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
     chars.push('\\');
     chars.push(')');
-    let mut outer_and = AndNode::parse_node(&mut chars)?;
-    let and_node = outer_and.and_mut_ref();
-    and_node.push(Node::Success);
+    let outer_and = AndNode::parse_node(&mut chars)?;
+//    let and_node = outer_and.and_mut_ref();
     Ok(outer_and)
 }
 
-//////////////////////////////////////////////////////////////////
-//
-// walk
-//
-// Main functions to walk the regexp tree to find a match
-//
-//////////////////////////////////////////////////////////////////
-#[derive(Debug)]
-pub struct Match {
-
+//#[derive(Debug)]
+pub struct Match<'a> {
+    node: walk::Path<'a>,
 }
 
-pub fn walk_tree(_tree: Node, _text: &str) -> Option<Match> {
+impl Match<'_> {
+    pub fn display(&self) { self.node.desc(0); }
+}
+
+pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<Match<'a>> {
+    let mut start = text; 
+    while start.len() > 0 {
+        println!("xxx {:#?}", start);
+        let node = tree.walk(start);
+        println!("yyy {:#?}", node.desc(0));
+        if node.len() > 1 {
+            return Some(Match { node });
+        }
+        start = &start[char_bytes(start, 1)..];
+    }
     None
 }
 //////////////////////////////////////////////////////////////////
@@ -595,6 +653,12 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
         num = num*10 + (digit as usize) - ('0' as usize);
     }
     if any { Some(num) } else { None }
+}
+
+// gets the number of bytes in a sring of unicode characters
+fn char_bytes(string: &str, char_count: usize) -> usize {
+    let s: String = string.chars().take(char_count).collect();
+    s.len()
 }
 
 // helper function to format debug

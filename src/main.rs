@@ -5,8 +5,12 @@ mod regexp;
 //use std::env;
 use clap::Parser;
 
+// interactive mode (TODO)
 const INTERACTIVE_DEFAULT: bool = false;
+// print RE parse tree
 const PRINTTREE_DEFAULT: bool = false;
+// print the current walk path as each step is taken
+const WALKTRACE_DEFAULT: bool = false;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, verbatim_doc_comment)]
@@ -22,6 +26,8 @@ pub struct Config {
     pub interactive: bool,
     #[clap(short, long, default_value_t = PRINTTREE_DEFAULT)]
     pub tree: bool,
+    #[clap(short, long, default_value_t = WALKTRACE_DEFAULT)]
+    pub walk: bool,
 }
 
 impl Config {
@@ -54,8 +60,9 @@ fn main() {
         println!("{:?}", tree);
     }
     if !config.text.is_empty() {
-        match regexp::walk_tree(tree, &config.text) {
-            Some(result) => println!("{:?}", result),
+        regexp::walk::set_walk_trace(config.walk);
+        match regexp::walk_tree(&tree, &config.text) {
+            Some(result) => println!("{:?}", result.display()),
             None => println!("No match"),
         }
     }
