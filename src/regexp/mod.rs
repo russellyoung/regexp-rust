@@ -10,6 +10,7 @@ const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap
 const TAB_INDENT:usize = 2;                     // indent in Debug display
 
 
+#[derive(PartialEq)]
 pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Matching(MatchingNode), None, }
 use core::fmt::Debug;
 impl Debug for Node {
@@ -21,7 +22,7 @@ impl Debug for Node {
     }
 }
 
-#[derive(Debug,Clone,Copy,)] 
+#[derive(Debug,Clone,Copy,PartialEq)] 
 pub struct Limits {
     min: usize,
     max: usize,
@@ -261,21 +262,21 @@ impl Node {
 
 // handles strings of regular characters
 // Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, PartialEq)]
 pub struct CharsNode {
     limits: Limits,
     string: String,
 }
 
 // handles special characters like ".", \N, etc.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, PartialEq)]
 pub struct SpecialCharNode {
     limits: Limits,
     special: char,
 }
 
 // handles AND (sequential) matches
-#[derive(Default, Debug)]
+#[derive(Default, Debug, PartialEq)]
 pub struct AndNode {
     limits: Limits,
     nodes: Vec<Node>,
@@ -283,7 +284,7 @@ pub struct AndNode {
 }
 
 // handles A\|B style matches
-#[derive(Default, Debug)]
+#[derive(Default, PartialEq, Debug)]
 pub struct OrNode {
     // No reps for OR node, to repeat it has to be surrounded by an AND
     // limit: Limit,
@@ -291,7 +292,7 @@ pub struct OrNode {
 }
 
 // handles [a-z] style matches
-#[derive(Default, Debug)]
+#[derive(Default, PartialEq, Debug)]
 pub struct MatchingNode {
     limits: Limits,
     targets: Vec<Matching>,
@@ -326,7 +327,7 @@ impl TreeNode for SpecialCharNode {
     fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String {
         let slash = if self.special == '.' { "" } else { "\\" };
-        format!("{}SpecialCharNode: '{}{}'", pad(indent), slash, self.special)
+        format!("{}SpecialCharNode: '{}{}{}'", pad(indent), slash, self.special, self.limits.to_string())
     }
 
     fn matches(&self, string: &str) -> bool {
@@ -373,7 +374,7 @@ impl TreeNode for OrNode {
 impl TreeNode for MatchingNode {
     fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String {
-        format!("{}Matching {} ({})", pad(indent), self.targets_string(), self.limits.to_string(), )
+        format!("{}Matching {}{}", pad(indent), self.targets_string(), self.limits.to_string(), )
     }
 }
 
@@ -441,7 +442,7 @@ impl SpecialCharNode {
     fn match_char(&self, ch: char) -> bool {
         match self.special {
             'N' => "0123456789".contains(ch),
-            // TODO: other matches
+            '.' => true,
             _ => false
         }
     }

@@ -8,24 +8,24 @@ use crate::regexp::*;
 //
 
 fn make_chars_string(string: &'static str) -> Node {
-    Node::Chars(CharsNode{string: string.to_string(), limit_desc: (1, 1, false)})
+    Node::Chars(CharsNode{string: string.to_string(), limits: Limits{min: 1, max: 1, lazy: false}})
 }
 fn make_chars_single(string: &'static str, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Chars(CharsNode{string: string.to_string(), limit_desc: (min, max, lazy)})
+    Node::Chars(CharsNode{string: string.to_string(), limits: Limits{min, max, lazy}})
 }
 fn make_special(special: char, min: usize, max: usize, lazy: bool) -> Node {
-    Node::SpecialChar(SpecialCharNode {special, limit_desc: (min, max, lazy)})
+    Node::SpecialChar(SpecialCharNode {special, limits: Limits {min, max, lazy}})
 }
 
-fn make_and(min: usize, max: usize, lazy: bool) -> Node {
-    Node::And(AndNode{nodes: Vec::<Node>::new(), limit_desc: (min, max, lazy)})
+fn make_and(min: usize, max: usize, lazy: bool, report: bool) -> Node {
+    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, report})
 }
 fn make_or() -> Node {
     Node::Or(OrNode{nodes: Vec::<Node>::new(), })
 }
 
 fn make_matching(not: bool, targets: Vec<Matching>, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Matching(MatchingNode{not, targets, limit_desc: (min, max, lazy)})
+    Node::Matching(MatchingNode{not, targets, limits: Limits{min, max, lazy}})
 }
 fn push_matchings(matching_node: &mut MatchingNode, matchings: &mut Vec<Matching>) {
     matching_node.targets.append(matchings);
@@ -43,7 +43,7 @@ impl Node {
 
 #[test]
 fn test_string_simple() {
-    let mut node = make_and(1, 1, false);
+    let mut node = make_and(1, 1, false, true);
     node.push(make_chars_string("abcd"));
 //    node.push(Node::Success);
     assert_eq!(node, parse_tree("abcd").unwrap());
@@ -51,7 +51,7 @@ fn test_string_simple() {
 
 #[test]
 fn test_string_embedded_reps() {
-    let mut node = make_and(1, 1, false);
+    let mut node = make_and(1, 1, false, true);
     node.push(make_chars_string("ab"));
     node.push(make_chars_single("c", 0, 1, false));
     node.push(make_chars_string("de", ));
@@ -64,7 +64,7 @@ fn test_string_embedded_reps() {
               
 #[test]
 fn test_string_embedded_reps_lazy() {
-    let mut node = make_and(1, 1, false);
+    let mut node = make_and(1, 1, false, true);
     node.push(make_chars_string("ab"));
     node.push(make_chars_single("c", 0, 1, true));
     node.push(make_chars_string("de", ));
@@ -78,7 +78,7 @@ fn test_string_embedded_reps_lazy() {
               
 #[test]
 fn test_special_in_string() {
-    let mut node = make_and(1, 1, false);
+    let mut node = make_and(1, 1, false, true);
     node.push(make_chars_string("abc"));
     node.push(make_special('.', 1, 1, false));
     node.push(make_chars_string("def", ));
@@ -93,7 +93,7 @@ fn test_special_in_string() {
     
 #[test]
 fn or_with_chars_bug() {
-    let mut node = make_and(1, 1, false);
+    let mut node = make_and(1, 1, false, true);
     node.push(make_chars_string("ab"));
     let mut or_node = make_or();
     or_node.push(make_chars_string("c"));
@@ -106,7 +106,7 @@ fn or_with_chars_bug() {
 
 #[test]
 fn matching_basic() {
-    let mut node = make_and(1, 1, false);
+    let mut node = make_and(1, 1, false, true);
     node.push(make_chars_string("ab"));
     let targets = vec![Matching::RegularChars("cde".to_string()),];
     node.push(make_matching(false, targets, 0, EFFECTIVELY_INFINITE, false));
