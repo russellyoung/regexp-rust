@@ -3,12 +3,13 @@ pub mod walk;
 mod tests;
 
 use std::str::Chars;
+use crate::trace;
 
 const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
 const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
 const TAB_INDENT:usize = 2;                     // indent in Debug display
 
-#[derive(PartialEq)]
+
 pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Matching(MatchingNode), None, }
 use core::fmt::Debug;
 impl Debug for Node {
@@ -19,6 +20,98 @@ impl Debug for Node {
         })
     }
 }
+
+#[derive(Debug,Clone,Copy,)] 
+pub struct Limits {
+    min: usize,
+    max: usize,
+    lazy: bool,
+}
+
+impl Default for Limits {
+    fn default() -> Limits { Limits{min: 1, max: 1, lazy: false} }
+}
+
+impl Limits {
+    fn to_string(&self) -> String {
+        let code = 
+            if self.min == 0 {
+                if self.max == 1 { "?".to_string() }
+                else if self.max >= EFFECTIVELY_INFINITE { "*".to_string() }
+                else { format!("{{0,{}}}", self.max) }
+            } else if self.min == 1 {
+                if self.max >= EFFECTIVELY_INFINITE { "+".to_string() }
+                else if self.max == 1 { "".to_string() }
+                else { format!("{{1,{}}}", self.max) }
+            } else if self.min == self.max {
+                format!("{{{}}}", self.min)
+            } else if self.max < EFFECTIVELY_INFINITE {
+                format!("{{{},{}}}", self.min, self.max)
+            } else {
+                format!("{{{},}}", self.min)
+            };
+        format!("{}{}", code, if self.lazy {" lazy" } else { "" })
+    }
+        
+    fn parse(chars: &mut Peekable) -> Result<Limits, String> {
+        let next = chars.next();
+        if next.is_none() { return Ok(Limits::default()); }
+        let next = next.unwrap();
+        let (min, max): (usize, usize) = match next {
+            '*' => (0, EFFECTIVELY_INFINITE),
+            '+' => (1, EFFECTIVELY_INFINITE),
+            '?' => (0, 1),
+            '{' => Limits::parse_ints(chars)?,
+            _ => { chars.put_back(next); return Ok(Limits::default()) },
+        };
+        let qmark = chars.peek();
+        let lazy = qmark.unwrap_or('x') == '?';
+        if lazy { let _ = chars.next(); }
+        Ok(Limits{min, max, lazy})
+    }
+
+    fn parse_ints(chars: &mut Peekable) -> Result<(usize, usize), String> {
+        let num = read_int(chars);
+        let peek = chars.next();
+        if num.is_none() || peek.is_none(){ return Err("Unterminated repetition block".to_string()); }
+        let num = num.unwrap();
+        match peek.unwrap() {
+            '}'=> Ok((num, num)),
+            ','=> {
+                let n2 = if let Some(n) = read_int(chars) { n }
+                else { EFFECTIVELY_INFINITE };
+                let terminate = chars.next();
+                if terminate.unwrap_or('x') != '}' {Err("Malformed repetition block error 1".to_string())}
+                else {Ok((num, n2))}
+            },
+            _ => Err("Malformed repetition block error 2".to_string())
+        }
+    }
+
+    // the sizes given here are 0 based, 
+    fn check(&self, size: usize) -> bool { self.min < size && size < self.max + 1 }
+}
+//
+// These functions parse the reps option from the re source
+//
+
+fn read_int(chars: &mut Peekable) -> Option<usize> {
+    let mut num: usize = 0;
+    let mut any = false;
+    loop {
+        let digit = chars.next();
+        if digit.is_none() { break; }
+        let digit = digit.unwrap();
+        if !('0'..='9').contains(&digit) {
+            chars.put_back(digit);
+            break;
+        }
+        any = true;
+        num = num*10 + (digit as usize) - ('0' as usize);
+    }
+    if any { Some(num) } else { None }
+}
+
 
 pub const NODE_CHARS:    usize = 0;
 pub const NODE_SPEC:     usize = 1;
@@ -71,7 +164,7 @@ impl Node {
         if prev.node_type() == NODE_CHARS {
             let chars_node = prev.chars_mut_ref();
             if chars_node.string.len() > 1 {
-                let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), limit_desc: (1, 1, false)});
+                let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), limits: Limits::default()});
                 nodes.push(prev);
                 nodes.push(new_node);
             }
@@ -168,38 +261,39 @@ impl Node {
 
 // handles strings of regular characters
 // Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
-#[derive(PartialEq, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct CharsNode {
-    limit_desc: (usize, usize, bool),
+    limits: Limits,
     string: String,
 }
 
 // handles special characters like ".", \N, etc.
-#[derive(PartialEq, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct SpecialCharNode {
-    limit_desc: (usize, usize, bool),
+    limits: Limits,
     special: char,
 }
 
 // handles AND (sequential) matches
-#[derive(PartialEq, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct AndNode {
-    limit_desc: (usize, usize, bool),
+    limits: Limits,
     nodes: Vec<Node>,
+    report: bool,
 }
 
 // handles A\|B style matches
-#[derive(PartialEq, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct OrNode {
     // No reps for OR node, to repeat it has to be surrounded by an AND
-    // limit_desc: (usize, usize, bool),
+    // limit: Limit,
     nodes: Vec<Node>,
 }
 
 // handles [a-z] style matches
-#[derive(PartialEq, Default, Debug)]
+#[derive(Default, Debug)]
 pub struct MatchingNode {
-    limit_desc: (usize, usize, bool),
+    limits: Limits,
     targets: Vec<Matching>,
     not: bool,
 }
@@ -214,44 +308,22 @@ pub struct MatchingNode {
 
 pub trait TreeNode {
     fn desc(&self, indent: usize) -> String;
-    fn limits(&self) -> (usize, usize, bool);
-    fn limit_str(&self) -> String {
-        let limits = self.limits();
-        let code = 
-            if limits.0 == 0 {
-                if limits.1 == 1 { "?".to_string() }
-                else if limits.1 >= EFFECTIVELY_INFINITE { "*".to_string() }
-                else { format!("{{0,{}}}", limits.1) }
-            } else if limits.0 == 1 {
-                if limits.1 >= EFFECTIVELY_INFINITE { "+".to_string() }
-                else if limits.1 == 1 { "".to_string() }
-                else { format!("{{1,{}}}", limits.1) }
-            } else if limits.0 == limits.1 {
-                format!("{{{}}}", limits.0)
-            } else if limits.1 < EFFECTIVELY_INFINITE {
-                format!("{{{},{}}}", limits.0, limits.1)
-            } else {
-                format!("{{{},}}", limits.0)
-            };
-        format!("{}{}", code, if limits.2 {" lazy" } else { "" })
-    }
     // looks for a single match, does not care about repeats
     fn matches<'a>(&self, string: &'a str) -> bool { string == "" }
-
+    fn get_limits(&self) -> Limits;
 }
 
 // CharsNode keeps a string of consecuive characters to look for. Really, it is like an AndNode where each node has a single
 // character, but that seems wasteful/ he sring contains no special chars, and it can have no repeat count unless there is
 // only a single character.
 impl TreeNode for CharsNode {
-    fn limits(&self) -> (usize, usize, bool) { self.limit_desc }
-    fn desc(&self, indent: usize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limit_str())}
+    fn get_limits(&self) -> Limits { self.limits.clone() }
+    fn desc(&self, indent: usize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits.to_string()) }
     fn matches<'a>(&self, string: &'a str) -> bool { string.starts_with(&self.string) }
 }
 
 impl TreeNode for SpecialCharNode {
-    fn limits(&self) -> (usize, usize, bool) { self.limit_desc }
-
+    fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String {
         let slash = if self.special == '.' { "" } else { "\\" };
         format!("{}SpecialCharNode: '{}{}'", pad(indent), slash, self.special)
@@ -269,9 +341,9 @@ impl TreeNode for SpecialCharNode {
     
 // format the limis for debugging
 impl TreeNode for AndNode {
-    fn limits(&self) -> (usize, usize, bool) { self.limit_desc }
+    fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String {
-        let mut msg = format!("{}AndNode {}", pad(indent), self.limit_str());
+        let mut msg = format!("{}AndNode {} {}", pad(indent), self.limits.to_string(), if self.report {"report"} else {""});
         for i in 0..self.nodes.len() {
             let disp_str = match self.nodes[i].tree_node() {
                 Some(node) => node.desc(indent + 1),
@@ -284,7 +356,7 @@ impl TreeNode for AndNode {
 }
 
 impl TreeNode for OrNode {
-    fn limits(&self) -> (usize, usize, bool) { (1, 1, false) }
+    fn get_limits(&self) -> Limits { Limits::default() }
     fn desc(&self, indent: usize) -> String {
         let mut msg = format!("{}OrNode", pad(indent), );
         for i in 0..self.nodes.len() {
@@ -299,11 +371,9 @@ impl TreeNode for OrNode {
 }
 
 impl TreeNode for MatchingNode {
-    fn limits(&self) -> (usize, usize, bool) { self.limit_desc }
+    fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String {
-        let target_str = self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join("");
-        let not = if self.not { "^" } else { "" };
-        format!("{}MatchingNode [{}{}]{}", pad(indent), not, target_str, self.limit_str(), )
+        format!("{}Matching {} ({})", pad(indent), self.targets_string(), self.limits.to_string(), )
     }
 }
 
@@ -347,10 +417,10 @@ impl CharsNode {
         }
         Ok(if chs.is_empty() { Node::None }
            else {
-               let limit_desc = if chs.len() == 1 { reps(chars)? } else { (1, 1, false) };
+               let limits = if chs.len() == 1 { Limits::parse(chars)? } else { Limits::default() };
                Node::Chars(CharsNode {
                    string: chs.into_iter().collect(),
-                   limit_desc
+                   limits
                })
            })
     }
@@ -365,7 +435,7 @@ impl SpecialCharNode {
             else if let Some(_ch1) = chars.peek() { chars.next().unwrap() }   // ch1 is next(), doing it this way gets the same value and pops it off
             else { return Ok(Node::None); }
         } else { return Ok(Node::None); };
-        Ok(Node::SpecialChar(SpecialCharNode { special, limit_desc: reps(chars)?}))
+        Ok(Node::SpecialChar(SpecialCharNode { special, limits: Limits::parse(chars)?}))
     }
 
     fn match_char(&self, ch: char) -> bool {
@@ -381,6 +451,8 @@ impl AndNode {
     fn push(&mut self, node: Node) { self.nodes.push(node); }
 
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
+        let report = chars.peek().unwrap_or('x') != '?';
+        if !report { let _ = chars.next(); }
         let mut nodes = Vec::<Node>::new();
         loop {
             let (ch0, ch1) = chars.peek_2();
@@ -397,9 +469,8 @@ impl AndNode {
         let _ = chars.next();
         let _ = chars.next();
         Ok(if nodes.is_empty() { Node::None }
-           else { Node::And(AndNode {nodes, limit_desc: reps(chars)?})})
+           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, report})})
     }
- 
 }
 
 impl OrNode {
@@ -443,7 +514,7 @@ impl MatchingNode {
         // eiher None or ']'
         if let Some(ch) = chars.next() { if ch != ']' {return Err("Unterminated Matching".to_string()); } };
         Ok(if targets.is_empty() { Node::None }
-           else { Node::Matching( MatchingNode {targets, not, limit_desc: reps(chars)?}) })
+           else { Node::Matching( MatchingNode {targets, not, limits: Limits::parse(chars)?}) })
     }
     
     fn matches(&self, string: &str) -> bool {
@@ -454,11 +525,13 @@ impl MatchingNode {
     }
     
     fn match_char(&self, ch: char) -> bool { self.not != self.targets.iter().any(move |x| x.matches(ch)) }
-}
-        
+    fn targets_string(&self) -> String {
+        format!("[{}{}]", if self.not {"^"} else {""}, self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join(""))
+    }
+}    
 // used to mark ranges for MatchingNode
 // TODO: maybe combine single chars into String so can use contains() to ge all at once?
-#[derive(PartialEq, Debug)]
+#[derive(Debug,PartialEq)]
 enum Matching {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
 
 /*
@@ -572,24 +645,16 @@ pub fn parse_tree(input: &str) -> Result<Node, String> {
     Ok(outer_and)
 }
 
-//#[derive(Debug)]
-pub struct Match<'a> {
-    node: walk::Path<'a>,
-}
-
-impl Match<'_> {
-    pub fn display(&self) { self.node.desc(0); }
-}
-
-pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<Match<'a>> {
+pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
     let mut start = text; 
     while start.len() > 0 {
-        println!("xxx {:#?}", start);
-        let node = tree.walk(start);
-        println!("yyy {:#?}", node.desc(0));
-        if node.len() > 1 {
-            return Some(Match { node });
+        if trace(0) {println!("\n==== WALK \"{}\" ====", start)};
+        let path = tree.walk(start);
+        if path.len() > 1 {
+            if trace(0) { println!("--- Search succeeded ---") };
+            return Some(path);
         }
+        if trace(0) {println!("==== WALK \"{}\": no match ====", start)};
         start = &start[char_bytes(start, 1)..];
     }
     None
@@ -599,61 +664,6 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<Match<'a>> {
 // Helper functions
 //
 //////////////////////////////////////////////////////////////////
-
-//
-// These functions parse the reps option from the re source
-//
-fn reps(chars: &mut Peekable) -> Result<(usize, usize, bool), String> {
-    let next = chars.next();
-    if next.is_none() { return Ok((1, 1, false)); }
-    let next = next.unwrap();
-    let (min, max): (usize, usize) = match next {
-        '*' => (0, EFFECTIVELY_INFINITE),
-        '+' => (1, EFFECTIVELY_INFINITE),
-        '?' => (0, 1),
-        '{' => custom_rep(chars)?,
-        _ => { chars.put_back(next); return Ok((1, 1, false)) },
-    };
-    let qmark = chars.peek();
-    let lazy = qmark.unwrap_or('x') == '?';
-    if lazy { let _ = chars.next(); }
-    Ok((min, max, lazy))
-}
-
-fn custom_rep(chars: &mut Peekable) -> Result<(usize, usize), String> {
-    let num = read_int(chars);
-    let peek = chars.next();
-    if num.is_none() || peek.is_none(){ return Err("Unterminated repetition block".to_string()); }
-    let num = num.unwrap();
-    match peek.unwrap() {
-        '}'=> Ok((num, num)),
-        ','=> {
-            let n2 = if let Some(n) = read_int(chars) { n }
-            else { EFFECTIVELY_INFINITE };
-            let terminate = chars.next();
-            if terminate.unwrap_or('x') != '}' { return Err("Malformed repetition block error 1".to_string()); }
-            Ok((num, n2))
-        },
-        _ => Err("Malformed repetition block error 2".to_string())
-    }
-}
-
-fn read_int(chars: &mut Peekable) -> Option<usize> {
-    let mut num: usize = 0;
-    let mut any = false;
-    loop {
-        let digit = chars.next();
-        if digit.is_none() { break; }
-        let digit = digit.unwrap();
-        if !('0'..='9').contains(&digit) {
-            chars.put_back(digit);
-            break;
-        }
-        any = true;
-        num = num*10 + (digit as usize) - ('0' as usize);
-    }
-    if any { Some(num) } else { None }
-}
 
 // gets the number of bytes in a sring of unicode characters
 fn char_bytes(string: &str, char_count: usize) -> usize {

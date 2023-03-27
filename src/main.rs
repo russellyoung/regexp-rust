@@ -3,15 +3,24 @@ mod regexp;
 
 //use crate::regexp;
 //use std::env;
-use clap::Parser;
+use clap::{Parser, value_parser};               // Command Line Argument Processing
 
 // interactive mode (TODO)
 const INTERACTIVE_DEFAULT: bool = false;
 // print RE parse tree
 const PRINTTREE_DEFAULT: bool = false;
-// print the current walk path as each step is taken
-const WALKTRACE_DEFAULT: bool = false;
+// print debugging messages
+const DEBUG_DEFAULT: u32 = 0;
 
+// Used for debugging: the function trace(Path) either is a no-op or prints the given path, depending on the command line args
+//static mut trace = |x| { println!("{:#?}", x) };
+// TODO: make this a macro
+static mut TRACE_LEVEL: u32 = 0;
+fn set_trace(level: u32) { unsafe { TRACE_LEVEL = level }}
+pub fn trace(level: u32) -> bool { unsafe { level < TRACE_LEVEL }}
+// trace 2: print walk enter, walk exit
+// trace 4: print step enter, step exit
+// trace 6: print backoff stuff
 #[derive(Parser, Debug)]
 #[command(author, version, about, verbatim_doc_comment)]
 ///
@@ -26,8 +35,8 @@ pub struct Config {
     pub interactive: bool,
     #[clap(short, long, default_value_t = PRINTTREE_DEFAULT)]
     pub tree: bool,
-    #[clap(short, long, default_value_t = WALKTRACE_DEFAULT)]
-    pub walk: bool,
+    #[clap(short, long, default_value_t = DEBUG_DEFAULT, value_parser=value_parser!(u32).range(0..40))]
+    pub debug: u32, 
 }
 
 impl Config {
@@ -48,6 +57,7 @@ fn main() {
             return;
         }
     };
+    set_trace(config.debug);
     // execution starts
     let tree = match regexp::parse_tree(&config.re) {
         Ok(node) => node,
@@ -57,12 +67,12 @@ fn main() {
         },
     };
     if config.tree {
-        println!("{:?}", tree);
+        println!("--- Parse tree:\n{:?}", tree);
     }
     if !config.text.is_empty() {
-        regexp::walk::set_walk_trace(config.walk);
-        match regexp::walk_tree(&tree, &config.text) {
-            Some(result) => println!("{:?}", result.display()),
+        let result = regexp::walk_tree(&tree, &config.text);
+        match result {
+            Some(path) => { if let Some(report) = path.report() { report.display(0); } else {println!("{}", path.matched_string());} },
             None => println!("No match"),
         }
     }

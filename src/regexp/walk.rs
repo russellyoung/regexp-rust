@@ -1,17 +1,6 @@
 
 use super::*;
-
-// Used for debugging: the function trace(Path) either is a no-op or prints the given path, depending on the command line args
-//static mut trace = |x| { println!("{:#?}", x) };
-static mut PRINT_TRACE: bool = false;
-pub fn set_walk_trace(turn_on: bool) { unsafe { PRINT_TRACE = turn_on }}
-
-fn trace(path: Path) -> Path {
-    unsafe { if PRINT_TRACE { println!("{}", path.desc(0)); }}
-    path
-}
-
-// top level function 
+use crate::trace;
 
 // simplifies code a little
 fn ref_last<T>(v: &Vec<T>) -> &T { &v[v.len() - 1] }
@@ -49,29 +38,59 @@ pub struct AndStep<'a> {
 // Conceptually a Path takes as many steps as it can along the target string. A Path is a series of Steps along a particular branch, from 0 up to
 // the maximum number allowed, or the maximum number matched, whichever is smaller. If continuing the search from the end of the Path fails it
 // backtracks a Step and tries again.
+#[derive(Debug)]
 pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Matching(Vec<MatchingStep<'a>>), And(Vec<AndStep<'a>>) }
 
-use core::fmt::Debug;
-impl<'a> Debug for Path<'a> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.desc(0))
+//use core::fmt::Debug;
+//impl<'a> Debug for Path<'a> {
+//    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+//        write!(f, "{}", self.desc(0))
+//    }
+//}
+
+pub struct Report<'a> {
+    found: &'a str,
+    subreports: Box<Vec<Report<'a>>>,
+}
+
+impl<'a> Report<'a> {
+    pub fn display(&self, indent: usize) {
+        println!("{}\"{}\"", pad(indent), self.found);
+        self.subreports.iter().for_each(move |r| r.display(indent + 1));
     }
 }
+
 impl<'a> Path<'a> {
+    pub fn report(&self) -> Option<Report> {
+        match self {
+            Path::And(steps) => {
+                if steps[0].node.report {
+                    Some(Report {found: self.matched_string(),
+                                 subreports: Box::new(ref_last(steps).child_paths.iter()
+                                                      .map(|p| p.report())
+                                                      .filter(|p| p.is_some())
+                                                      .map(|p| p.unwrap())
+                                                      .collect())})
+                } else { None }
+            },
+            _ => None
+        }
+    }
+    
     pub fn desc(&self, indent: usize) -> String {
         match self {
-            Path::Chars(steps) => { println!("{:?}", steps); format!("{}chars({}): \"{}\"", pad(indent), steps.len() - 1, self.matched_string())},
-            Path::Special(steps) => format!("{}special({}): \"{}\"", pad(indent), steps.len() - 1, self.matched_string()),
-            Path::Matching(steps) => format!("{}matching({}): \"{}\"", pad(indent), steps.len() - 1, self.matched_string()),
+            Path::Chars(steps) => format!("{}chars({}): '{}'", pad(indent), steps.len() - 1, self.matched_string()),
+            Path::Special(steps) => format!("{}special({}): '{}'", pad(indent), steps.len() - 1, self.matched_string()),
+            Path::Matching(steps) => format!("{}matching({}): '{}'", pad(indent), steps.len() - 1, self.matched_string()),
             Path::And(steps) => {
-                let mut msg = format!("{}and({}): \"{}\"", pad(indent), steps.len() - 1, self.matched_string());
+                let mut msg = format!("{}and({}): '{}'", pad(indent), steps.len() - 1, self.matched_string());
                 let last_step = ref_last(steps);
                 for substep in last_step.child_paths.iter() {
                     msg.push_str(format!("\n{}", substep.desc(indent + 1)).as_str());
                 }
                 msg
             },
-            _=> panic!("TODO")
+//            _=> panic!("TODO")
         }
     }
     pub fn len(&self) -> usize {
@@ -94,10 +113,10 @@ impl<'a> Path<'a> {
     }
     
     // gets the remaining target string at current path position
-    fn matched_string(&self) -> &'a str {
+    pub fn matched_string(&self) -> &'a str {
         let match_len = self.match_len();
         match self {
-            Path::Chars(steps) =>    { println!("matched_string: {:#?}", steps); &steps[0].string[0..match_len]},
+            Path::Chars(steps) =>    &steps[0].string[0..match_len],
             Path::Special(steps) =>  &steps[0].string[0..match_len],
             Path::Matching(steps) => &steps[0].string[0..match_len],
             Path::And(steps) =>      &steps[0].string[0..match_len],
@@ -114,22 +133,29 @@ impl<'a> Path<'a> {
             //            _ => &"",
         }
     }
-    fn in_limits(&self) -> bool {
-        match self {
-            Path::Chars(steps) => steps[0].node.limit_desc.0 < self.len() && self.len() <= steps[0].node.limit_desc.1,
-            Path::Special(steps) => steps[0].node.limit_desc.0 < self.len() && self.len() <= steps[0].node.limit_desc.1,
-            Path::Matching(steps) => steps[0].node.limit_desc.0 < self.len() && self.len() <= steps[0].node.limit_desc.1,
-            Path::And(steps) => steps[0].node.limit_desc.0 < self.len() && self.len() <= steps[0].node.limit_desc.1,
-        }
-    }
     fn pop(&mut self) -> bool {
         match self {
-            Path::Chars(steps) =>    { steps.pop(); (steps.len() > 0) && (steps.len() > steps[0].node.limit_desc.0)},
-            Path::Special(steps) =>  { steps.pop(); (steps.len() > 0) && (steps.len() > steps[0].node.limit_desc.0)},
-            Path::Matching(steps) => { steps.pop(); (steps.len() > 0) && (steps.len() > steps[0].node.limit_desc.0)},
-            Path::And(steps) =>      { steps.pop(); (steps.len() > 0) && (steps.len() > steps[0].node.limit_desc.0)},
+            Path::Chars(steps) =>    { steps.pop(); },
+            Path::Special(steps) =>  { steps.pop(); },
+            Path::Matching(steps) => { steps.pop(); },
+            Path::And(steps) =>      { steps.pop(); },
             //            _ => &"",
         }
+        self.in_limits()
+    }
+    
+    fn in_limits(&self) -> bool {
+        match self {
+            Path::Chars(steps) =>    steps[0].node.limits.check(steps.len()),
+            Path::Special(steps) =>  steps[0].node.limits.check(steps.len()),
+            Path::Matching(steps) => steps[0].node.limits.check(steps.len()),
+            Path::And(steps) =>      steps[0].node.limits.check(steps.len()),
+            //            _ => &"",
+        }
+    }
+    fn trace(self) -> Path<'a> {
+        if trace(0) { println!("pushing {}", self.desc(0)); }
+        self
     }
 }
 
@@ -137,106 +163,156 @@ impl<'a> Path<'a> {
 
 impl<'a> CharsStep<'a> {
     pub fn walk(node: &'a CharsNode, string: &'a str) -> Path<'a> {
+        if trace(2) { println!(" -> WALK CHAR \"{}\" {}", node.string, abbrev(string)); }
         let mut steps = Vec::<CharsStep>::new();
         steps.push(CharsStep {node, string, match_len: 0});
-        for _i in 1..(node.limit_desc.1 + 1) {
+        for _i in 1..=node.limits.max {
             match ref_last(&steps).step() {
                 Some(s) => steps.push(s),
-                None => { break; }
+                None => break,
             }
         }
-        trace(Path::Chars(steps))
+        if trace(2) { println!(" <- WALK CHAR \"{}\", {} steps", node.string, steps.len()); }
+        Path::Chars(steps).trace()
     }
     // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
     fn step(&self) -> Option<CharsStep<'a>> {
+        if trace(4) {println!("    -> STEP CHAR \"{}\" ({})", self.node.string, abbrev(self.string));}
         let string = &self.string[self.match_len..];
         if self.node.matches(string) {
+            if trace(4) {println!("    <- STEP CHAR \"{}\" matches \"{}\"", self.node.string, self.node.string);}
             Some(CharsStep {node: self.node, string, match_len: self.node.string.len()})
-        } else { None }
+        } else {
+            if trace(4) {println!("    <- STEP CHAR \"{}\": no match", self.node.string);}
+            None
+        }
     }
 }
 
 impl<'a> SpecialStep<'a> {
     pub fn walk(node: &'a SpecialCharNode, string: &'a str) -> Path<'a> {
+        if trace(2) { println!(" -> WALK SPECIAL \"{}\" {}", node.special, abbrev(string)); }
         let mut steps = Vec::<SpecialStep>::new();
         steps.push(SpecialStep {node, string, match_len: 0});
-        for _i in 1..(node.limit_desc.1 + 1) {
+        for _i in 1..=node.limits.max {
             match ref_last(&steps).step() {
                 Some(s) => steps.push(s),
                 None => { break; }
             }
         }
-        trace(Path::Special(steps))
+        if trace(2) { println!(" <- WALK SPECIAL \"{}\", {} steps", node.special, steps.len()); }
+        Path::Special(steps).trace()
     }
     fn step (&self) -> Option<SpecialStep<'a>> {
         let string = &self.string[self.match_len..];
+        if trace(4) {println!("    -> STEP SPECIAL \"{}\" ({})", self.node.special, abbrev(string));}
         if self.node.matches(string) {
-            Some(SpecialStep {node: self.node, string, match_len: char_bytes(string, 1)})
-        } else { None }
+            let step = SpecialStep {node: self.node, string, match_len: char_bytes(string, char_bytes(string, 1))};
+            if trace(4) {println!("    <- STEP SPECIAL \"{}\" matches \"{}\"", self.node.special, &string[0..step.match_len]);}
+            Some(step)
+        } else {
+            if trace(4) {println!("    <- STEP SPECIAL \"{}\": no match", self.node.special);}
+            None
+        }
     }
 }
 
 impl<'a> MatchingStep<'a> {
     pub fn walk(node: &'a MatchingNode, string: &'a str) -> Path<'a> {
+        if trace(2) { println!(" -> WALK MATCHING \"{}\" {}", node.targets_string(), abbrev(string)); }
         let mut steps = Vec::<MatchingStep>::new();
         steps.push(MatchingStep {node, string, match_len: 0});
-        for _i in 1..(node.limit_desc.1 + 1) {
+        for _i in 1..=node.limits.max {
             match ref_last(&steps).step() {
                 Some(s) => steps.push(s),
                 None => { break; }
             }
         }
-        trace(Path::Matching(steps))
+        if trace(2) { println!(" <- WALK MATCHING \"{}\", {} steps", node.targets_string(), steps.len()); }
+        Path::Matching(steps).trace()
     }
     fn step (&self) -> Option<MatchingStep<'a>> {
         let string = &self.string[self.match_len..];
+        if trace(4) {println!("    -> STEP MATCHING {} ({})", self.node.targets_string(), abbrev(string));}
         if self.node.matches(string) {
-            Some(MatchingStep {node: self.node, string, match_len: char_bytes(string, 1)})
-        } else { None }
+            let step = MatchingStep {node: self.node, string, match_len: char_bytes(string, 1)};
+            if trace(4) {println!("    <- STEP MATCHING {} matches \"{}\"", self.node.targets_string(), &string[0..step.match_len]);}
+            Some(step)
+        } else {
+            if trace(4) {println!("    <- STEP SPECIAL \"{}\": no match", self.node.targets_string());}
+            None
+        }
     }
 }
 
 impl<'a> AndStep<'a> {
     pub fn walk(node: &'a AndNode, string: &'a str) -> Path<'a> {
+        if trace(2) { println!(" -> WALK AND({}) {}", node.nodes.len(), abbrev(string)); }
         let mut steps = Vec::<AndStep>::new();
         steps.push(AndStep {node, string, match_len: 0, child_paths: Vec::<Path<'a>>::new()});
-        for _i in 1..(node.limit_desc.1 + 1) {
+        for i in 1..=node.limits.max {
+            if trace(6) {println!("    WALK AND loop {} of {}", i, node.nodes.len());}
             match ref_last(&steps).step() {
                 Some(s) => steps.push(s),
                 None => { break; }
             }
         }
-        trace(Path::And(steps))
+        if trace(2) { println!(" <- WALK AND({}), {} steps", node.nodes.len(), steps.len()); }
+        Path::And(steps).trace()
     }
-//    fn last_path(&self) -> &Path { &self.child_paths[self.child_paths.len() - 1] }
+
+    //    fn last_path(&self) -> &Path { &self.child_paths[self.child_paths.len() - 1] }
     fn step (&self) -> Option<AndStep<'a>> {
+        let string0 = &self.string[self.match_len..];
+        if trace(4) {println!("    -> STEP AND {} ({})", self.node.nodes.len(), abbrev(string0));}
+        let limits = self.node.get_limits();
         let mut step = AndStep {node: self.node,
-                                string: &self.string[self.match_len..],
+                                string: string0,
                                 match_len: 0,
                                 child_paths: Vec::<Path<'a>>::new(),
         };
         loop {
             let child_len = step.child_paths.len();
             if child_len == step.node.nodes.len() { break; }
-            let next_child_path = step.node.nodes[child_len].walk(if child_len == 0 { step.string } else {ref_last(&step.child_paths).string_end()});
-            step.child_paths.push(next_child_path);
-            if !ref_last(&step.child_paths).in_limits() {
-                while step.back_off() {
-                    if step.child_paths.is_empty() { return None; }
+            let string = if child_len == 0 { step.string } else {ref_last(&step.child_paths).string_end()};
+            if trace(8) {println!("      STEP AND loop {}, {}", child_len, abbrev(string));}
+            let next_child_path = step.node.nodes[child_len].walk(string);
+            if limits.min + 1 <= next_child_path.len() {
+                if trace(3) {println!("push next_child_path {:#?}", next_child_path.desc(0));}
+                step.child_paths.push(next_child_path);
+            } else {
+                while !step.back_off() {
+                    if step.child_paths.is_empty() {
+                        if trace(4) {println!("    <- STEP AND ({}): no match", self.node.nodes.len());}
+                        return None;
+                    }
                 }
             }
         }
-        step.match_len = ref_last(&step.child_paths).string_end().len() - step.string.len();
+        if trace(5) {println!("{:#?}", step);}
+        step.match_len = step.string.len() - ref_last(&step.child_paths).string_end().len();
+        if trace(4) {println!("    <- STEP AND {} matches \"{}\"", self.node.nodes.len(), &step.string[0..step.match_len]);}
         Some(step)
     }
 
     fn back_off(&mut self) -> bool {
+        if trace(2) { println!("backing off"); }
+        if self.child_paths.is_empty() { return false; }
+        let limits = self.node.get_limits();
         loop {
-            let last_subpath = self.child_paths.len() - 1;
+            let mut last_subpath = self.child_paths.len() - 1;
+            if trace(3) { println!("back-off {}({})", last_subpath, self.child_paths[last_subpath].len()); }
+            if last_subpath <= limits.min {
+                let _ = self.child_paths.pop();
+                if self.child_paths.is_empty() { return false; }
+                last_subpath -= 1;
+            }
             if self.child_paths[last_subpath].pop() { break; }
-            self.child_paths.pop();
-            if self.child_paths.is_empty() { break; }
+            if self.child_paths.is_empty() { return false; }
         }
-        !self.child_paths.is_empty()
+        true
     }
 }
+
+const ABBREV_LEN: usize = 5;
+fn abbrev(string: &str) -> String { if string.len() < ABBREV_LEN {format!("\"{}\"", string)} else {format!("\"{}...\"", &string[0..char_bytes(&string, ABBREV_LEN)])} }
