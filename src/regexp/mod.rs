@@ -16,7 +16,7 @@ const TAB_INDENT:usize = 2;                     // indent in Debug display
 
 
 #[derive(PartialEq)]
-pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Matching(MatchingNode), None, }
+pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Set(SetNode), None, }
 use core::fmt::Debug;
 impl Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -39,7 +39,7 @@ impl Default for Limits {
 }
 
 impl Limits {
-    fn to_string(&self) -> String {
+    fn display_string(self) -> String {
         let code = 
             if self.min == 0 {
                 if self.max == 1 { "?".to_string() }
@@ -132,7 +132,7 @@ pub const NODE_CHARS:    usize = 0;
 pub const NODE_SPEC:     usize = 1;
 pub const NODE_AND:      usize = 2;
 pub const NODE_OR:       usize = 3;
-pub const NODE_MATCHING: usize = 4;
+pub const NODE_SET: usize = 4;
 //pub const NODE_SUCCESS:  usize = 5;
 pub const NODE_NONE:     usize = 6;
 
@@ -144,7 +144,7 @@ impl Node {
             Node::SpecialChar(_a) => NODE_SPEC,
             Node::And(_a)         => NODE_AND,
             Node::Or(_a)          => NODE_OR,
-            Node::Matching(_a)    => NODE_MATCHING,
+            Node::Set(_a)    => NODE_SET,
             Node::None            => NODE_NONE,
         }
     }
@@ -153,7 +153,7 @@ impl Node {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, string),
             Node::SpecialChar(special_node) => walk::SpecialStep::walk(special_node, string),
-            Node::Matching(matching_node) => walk::MatchingStep::walk(matching_node, string),
+            Node::Set(set_node) => walk::SetStep::walk(set_node, string),
             Node::And(and_node) => walk::AndStep::walk(and_node, string),
             Node::Or(or_node) => walk::OrStep::walk(or_node, string),
             _ => panic!("TODO")
@@ -198,7 +198,7 @@ impl Node {
     //  - In addition, if the preceding node is CHARS and its length is >1 it needs to be split, since the
     //    OR only binds a single character
     fn or_into_and(mut self, nodes: &mut Vec<Node>) {
-        if nodes.len() == 0 { return; }
+        if nodes.is_empty() { return; }
         Node::chars_before_or(nodes);
         let mut prev = nodes.pop().unwrap();
         match prev.node_type() {
@@ -227,7 +227,7 @@ impl Node {
             Node::SpecialChar(a) => Some(a),
             Node::And(a)         => Some(a),
             Node::Or(a)          => Some(a),
-            Node::Matching(a)    => Some(a),
+            Node::Set(a)    => Some(a),
             Node::None           => None,
         }
     }
@@ -315,9 +315,9 @@ pub struct OrNode {
 
 // handles [a-z] style matches
 #[derive(Default, PartialEq, Debug)]
-pub struct MatchingNode {
+pub struct SetNode {
     limits: Limits,
-    targets: Vec<Matching>,
+    targets: Vec<Set>,
     not: bool,
 }
 
@@ -332,21 +332,21 @@ pub struct MatchingNode {
 pub trait TreeNode {
     fn desc(&self, indent: usize) -> String;
     // looks for a single match, does not care about repeats
-    fn matches<'a>(&self, string: &'a str) -> bool { string == "" }
+    fn matches(&self, string: &str) -> bool { string.is_empty() }
 }
 
 // CharsNode keeps a string of consecuive characters to look for. Really, it is like an AndNode where each node has a single
 // character, but that seems wasteful/ he sring contains no special chars, and it can have no repeat count unless there is
 // only a single character.
 impl TreeNode for CharsNode {
-    fn desc(&self, indent: usize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits.to_string()) }
-    fn matches<'a>(&self, string: &'a str) -> bool { string.starts_with(&self.string) }
+    fn desc(&self, indent: usize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits.display_string()) }
+    fn matches(&self, string: &str) -> bool { string.starts_with(&self.string) }
 }
 
 impl TreeNode for SpecialCharNode {
     fn desc(&self, indent: usize) -> String {
         let slash = if self.special == '.' { "" } else { "\\" };
-        format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits.to_string())
+        format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits.display_string())
     }
 
     fn matches(&self, string: &str) -> bool {
@@ -362,7 +362,7 @@ impl TreeNode for SpecialCharNode {
 // format the limis for debugging
 impl TreeNode for AndNode {
     fn desc(&self, indent: usize) -> String {
-        let mut msg = format!("{}AndNode {} {}", pad(indent), self.limits.to_string(), if self.report {"report"} else {""});
+        let mut msg = format!("{}AndNode {} {}", pad(indent), self.limits.display_string(), if self.report {"report"} else {""});
         for i in 0..self.nodes.len() {
             let disp_str = match self.nodes[i].tree_node() {
                 Some(node) => node.desc(indent + 1),
@@ -388,9 +388,9 @@ impl TreeNode for OrNode {
     }
 }
 
-impl TreeNode for MatchingNode {
+impl TreeNode for SetNode {
     fn desc(&self, indent: usize) -> String {
-        format!("{}Matching {}{}", pad(indent), self.targets_string(), self.limits.to_string(), )
+        format!("{}Set {}{}", pad(indent), self.targets_string(), self.limits.display_string(), )
     }
 }
 
@@ -505,11 +505,11 @@ impl OrNode {
     }
 }
 
-impl MatchingNode {
-    fn push(&mut self, matching: Matching) { self.targets.push(matching); }
+impl SetNode {
+    fn push(&mut self, set: Set) { self.targets.push(set); }
     
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
-        let mut targets = Vec::<Matching>::new();
+        let mut targets = Vec::<Set>::new();
         let mut not = false;
         if let Some(ch) = chars.peek() {
             if ch == '^' {
@@ -522,16 +522,16 @@ impl MatchingNode {
                 None => break,
                 Some(ch) => {
                     if ch == ']' { break; }
-                    let target = Matching::parse_next(chars)?; 
-                    if target != Matching::Empty {targets.push(target) }
+                    let target = Set::parse_next(chars)?; 
+                    if target != Set::Empty {targets.push(target) }
                 },
             }
         }
         
         // eiher None or ']'
-        if let Some(ch) = chars.next() { if ch != ']' {return Err("Unterminated Matching".to_string()); } };
+        if let Some(ch) = chars.next() { if ch != ']' {return Err("Unterminated Set".to_string()); } };
         Ok(if targets.is_empty() { Node::None }
-           else { Node::Matching( MatchingNode {targets, not, limits: Limits::parse(chars)?}) })
+           else { Node::Set( SetNode {targets, not, limits: Limits::parse(chars)?}) })
     }
     
     fn matches(&self, string: &str) -> bool {
@@ -546,39 +546,39 @@ impl MatchingNode {
         format!("[{}{}]", if self.not {"^"} else {""}, self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join(""))
     }
 }    
-// used to mark ranges for MatchingNode
+// used to mark ranges for SetNode
 // TODO: maybe combine single chars into String so can use contains() to ge all at once?
 #[derive(Debug,PartialEq)]
-enum Matching {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
+enum Set {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
 
 /*
-impl Debug for Matching {
+impl Debug for Set {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Matching::Range(ch0, ch1) => write!(f, "[{} - {}]", ch0, ch1),
-            Matching::RegularChars(string) => write!(f, "{}", string),
-            Matching::SpecialChar(ch) => write!(f, "\\{}", ch),
+            Set::Range(ch0, ch1) => write!(f, "[{} - {}]", ch0, ch1),
+            Set::RegularChars(string) => write!(f, "{}", string),
+            Set::SpecialChar(ch) => write!(f, "\\{}", ch),
         }
     }
 }
  */
 
-impl Matching {
+impl Set {
     fn desc(&self) -> String {
         match self {
-            Matching::RegularChars(string) => string.to_string(),
-            Matching::SpecialChar(ch) => format!("\\{}", ch),
-            Matching::Range(ch0, ch1) => format!("{}-{}", ch0, ch1),
-            Matching::Empty => "*EMPTY*".to_string(),
+            Set::RegularChars(string) => string.to_string(),
+            Set::SpecialChar(ch) => format!("\\{}", ch),
+            Set::Range(ch0, ch1) => format!("{}-{}", ch0, ch1),
+            Set::Empty => "*EMPTY*".to_string(),
         }
     }
-    fn parse_next(chars: &mut Peekable) -> Result<Matching, String> {
+    fn parse_next(chars: &mut Peekable) -> Result<Set, String> {
         Ok(match chars.peek_2() {
             (Some(ch0), Some(ch1)) => {
                 if ch1 == '-'{
-                    Matching::Range(chars.next().unwrap(), (chars.next(), chars.next().unwrap()).1)
+                    Set::Range(chars.next().unwrap(), (chars.next(), chars.next().unwrap()).1)
                 } else if ch0 == '\\' {
-                    Matching::SpecialChar((chars.next(), chars.next()).1.unwrap())
+                    Set::SpecialChar((chars.next(), chars.next()).1.unwrap())
                 } else {
                     let mut string = "".to_string();
                     loop {
@@ -587,21 +587,21 @@ impl Matching {
                                 if ch0 == ']' || ch0 == '\\' || ch1 == '-' { break; }
                                 string.push(chars.next().unwrap());
                             },
-                            _ => { return Err("Unterminated matching block".to_string()); },
+                            _ => { return Err("Unterminated set block".to_string()); },
                         }
                     }
-                    if string.is_empty() {Matching::Empty} else {Matching::RegularChars(string)}
+                    if string.is_empty() {Set::Empty} else {Set::RegularChars(string)}
                 }
             }
-            _ => Matching::Empty,
+            _ => Set::Empty,
         })
     }
     fn matches(&self, ch: char) -> bool {
         match self {
-            Matching::RegularChars(string) => string.contains(ch),
-            Matching::SpecialChar(_ch) => false,   // TODO
-            Matching::Range(ch0, ch1) => *ch0 <= ch && ch <= *ch1,
-            Matching::Empty => false,
+            Set::RegularChars(string) => string.contains(ch),
+            Set::SpecialChar(_ch) => false,   // TODO
+            Set::Range(ch0, ch1) => *ch0 <= ch && ch <= *ch1,
+            Set::Empty => false,
         }
     }
 }
@@ -620,31 +620,30 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
     if ch0.is_none() { return Ok(Node::None); }
     let ch0 = ch0.unwrap();
     let ch1 = ch1.unwrap_or(' ');  // SPACE isn't in any special character sequence
-    Ok(
-        if ch0 == '[' {
-            let _ = chars.next();
-            MatchingNode::parse_node(chars)
-        } else if ch0 == '\\' {
-            if ch1 != '(' && ch1 != '|' {
-                if ch1 == '\\' {
-                    CharsNode::parse_node(chars)
-                } else {
-                    SpecialCharNode::parse_node(chars)
-                }
+    if ch0 == '[' {
+        let _ = chars.next();
+        SetNode::parse_node(chars)
+    } else if ch0 == '\\' {
+        if ch1 != '(' && ch1 != '|' {
+            if ch1 == '\\' {
+                CharsNode::parse_node(chars)
             } else {
-                let _ = chars.next();
-                let _ = chars.next();
-                if ch1 == '(' {
-                    AndNode::parse_node(chars)
-                } else {
-                    OrNode::parse_node(chars)
-                }
+                SpecialCharNode::parse_node(chars)
             }
-        } else if ch0 == '.' {
-            SpecialCharNode::parse_node(chars)
         } else {
-            CharsNode::parse_node(chars)
-        }?)
+            let _ = chars.next();
+            let _ = chars.next();
+            if ch1 == '(' {
+                AndNode::parse_node(chars)
+            } else {
+                OrNode::parse_node(chars)
+            }
+        }
+    } else if ch0 == '.' {
+        SpecialCharNode::parse_node(chars)
+        } else {
+        CharsNode::parse_node(chars)
+    }
 }
 
 //
@@ -653,7 +652,7 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
 // Wraps the in put with "\(...\)" so it becomes an AND node, and sticks the SUCCESS node on the end when done
 pub fn parse_tree(input: &str) -> Result<Node, String> {
     // wrap the string in "\(...\)" to make it an implicit AND node
-    let anchor_front = input.chars().next().unwrap() == '$';
+    let anchor_front = input.starts_with('$');
     let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
     chars.push('\\');
     chars.push(')');
@@ -680,7 +679,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
             }
         };
     }
-    while start.len() > 0 {
+    while !start.is_empty() {
         if trace(0) {println!("\n==== WALK \"{}\" ====", start)};
         let path = tree.walk(start);
         if path.len() > 1 {

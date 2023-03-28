@@ -24,11 +24,11 @@ fn make_or() -> Node {
     Node::Or(OrNode{nodes: Vec::<Node>::new(), })
 }
 
-fn make_matching(not: bool, targets: Vec<Matching>, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Matching(MatchingNode{not, targets, limits: Limits{min, max, lazy}})
+fn make_set(not: bool, targets: Vec<Set>, min: usize, max: usize, lazy: bool) -> Node {
+    Node::Set(SetNode{not, targets, limits: Limits{min, max, lazy}})
 }
-fn push_matchings(matching_node: &mut MatchingNode, matchings: &mut Vec<Matching>) {
-    matching_node.targets.append(matchings);
+fn push_sets(set_node: &mut SetNode, sets: &mut Vec<Set>) {
+    set_node.targets.append(sets);
 }
 
 impl Node {
@@ -105,17 +105,17 @@ fn or_with_chars_bug() {
 }
 
 #[test]
-fn matching_basic() {
+fn set_basic() {
     let mut node = make_and(1, 1, false, true);
     node.push(make_chars_string("ab"));
-    let targets = vec![Matching::RegularChars("cde".to_string()),];
-    node.push(make_matching(false, targets, 0, EFFECTIVELY_INFINITE, false));
+    let targets = vec![Set::RegularChars("cde".to_string()),];
+    node.push(make_set(false, targets, 0, EFFECTIVELY_INFINITE, false));
     node.push(make_chars_string("fg"));
-    let targets = vec![Matching::RegularChars("h".to_string()),
-                       Matching::Range('i', 'k'),
-                       Matching::RegularChars("lm".to_string()),
-                       Matching::SpecialChar('N')];
-    node.push(make_matching(true, targets, 1, 1, false));
+    let targets = vec![Set::RegularChars("h".to_string()),
+                       Set::Range('i', 'k'),
+                       Set::RegularChars("lm".to_string()),
+                       Set::SpecialChar('N')];
+    node.push(make_set(true, targets, 1, 1, false));
 //    node.push(Node::Success);
     assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\N]").unwrap());
 }
@@ -160,6 +160,14 @@ fn simple_chars() {
 }
     
 #[test]
+fn unicode() {
+    find("abc", "ab你好abcd", "abc");
+    find("你好", "ab你好abcd", "你好");
+    find("你好you-all", "ab你好you-allabcd", "你好you-all");
+    find("a.*a", "qqab你好abcd", "ab你好a");
+}
+
+    
 fn chars_in_and() {
     find("abc*d", "abcdz", "abcd");
     find("abc+d", "abcdz", "abcd");
@@ -184,7 +192,7 @@ fn special_chars() {
 }
     
 #[test]
-fn matching_chars() {
+fn set_chars() {
     find(r"[abc]+", "xabacaacd", "abacaac");
     find(r"z[abc]*z", "abzzcd", "zz");
     find(r"z[abc]*z", "abzaabczcd", "zaabcz");
@@ -194,6 +202,6 @@ fn matching_chars() {
 }
 
 #[test]
-fn non_matching_chars() {
+fn non_set_chars() {
     find("a[^e-m]*", "aabcdefghij", "aabcd");
 }

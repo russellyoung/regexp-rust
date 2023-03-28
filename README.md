@@ -8,8 +8,24 @@ That leads into this second project. I wrote a [regexp search program in C](http
 
 ### _The current state_
 
-The parser runs fine, and there are tests to handle some simple cases. More need to be added, but most testing will do full searching, the parser tree tests are mainly sanity tests to point the way if something is really wrong.
+I'm pleased to say it is basically working. "Basically" here means the main functions are working, at least as far as I've tested them. The main functions are AND, OR, CHAR_MATCH, SPECIAL_MATCH (\N, ', etc.), and SET ([a-z], etc.) all work. Unicode seems to work, at least simple stuff - I know it can get complicated, but basic simple unicode strings (containing hanzi) While it is not fully tested, since the last few bugs were found all tests seems to work on the first try, so while there may still be minor bugs in the code the design looks solid.
 
-The next step is to walk the tree. I'm pretty sur ehow to do it, but still need to think a little bit about how to return the state when a particular node succeeds.
+### _TODO_
 
-To me this feels much more like a Rust program than Tetrii did. In particular, it starts to make use of features like traits, enums, and distinguishes between mutable and immutable. I'd be curious to hear what others think.
+There is still a good-sized TODO list:
+
+- implement lazy evaluation
+- implement named capture groups
+- add more special chars - currently only has '.' and '\N' (numeric), should add ^, $, whitespace, uppercase, lowercase...
+- REFACTOR (most important). Especially in WALK, there is a lot of repeat code that can probably be replaced using traits properly. During development I intentionally did not think much about this. For one thing I was concentrating more on the Rust features needed to implement the types one by one, and I wasn't sure how much overlap there would be (it turned out to be a lot).
+
+It would be really helpful to get some comments on the current design, and my thoughts for using traits. Other things I wonder about:
+
+- Is wrapping my structs in enums a bad idea? I haven't seen this done elsewhere, usually Box is used. Is there some reason this would be discouraged?
+- How about my trace() method? While it doesn't make a big difference here I don't want to evaluate the args unless they will be printed. This looks like a good place for a macro, right? That may be the next thing I try figuring out, though it looks kind of daunting.
+- I think a well designed trait would let me make all the Path enums contents use the dyn trait rather than different objects. This would minimize the need for all those Path methofs that just distribute messages to their struct content. I looked into this briefly at one poin but ran into issues and wen back to the simpler way.
+- Maybe moving Limits from the Steps to the Path would simplify things.
+- If I do unify the Step objects with a Walk trait I wonder what that does to my trace system. I guess the messages could be added as functions in the trait, for instance "trace_enter_walk()"
+- lazy evaluation is very similar to greedy, it differs only in the initial walk is to the minimum rather than the maximum, and the backoff() method does a step rather than pops off a step. I suppose supplying whole new methods for it would work, but there must be a cleverer way to do it.
+
+Comments welcomed and encouraged. I promise to think about everything that comes in.
