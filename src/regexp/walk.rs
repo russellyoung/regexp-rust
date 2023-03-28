@@ -4,12 +4,14 @@ use crate::trace;
 
 // simplifies code a little
 fn ref_last<T>(v: &Vec<T>) -> &T { &v[v.len() - 1] }
+const OR_LIMITS: Limits = Limits{min: 1, max: 1, lazy: false};
 
 // used to hold the state at each step in the search walk, and later to build the final result if successful
 #[derive(Debug)]
 pub struct CharsStep<'a> {
     node: &'a CharsNode,
     string: &'a str,
+    // Important: match_len is in bytes, not characters
     match_len: usize,
 }
 
@@ -35,11 +37,20 @@ pub struct AndStep<'a> {
     child_paths: Vec<Path<'a>>,
 }
 
+#[derive(Debug)]
+pub struct OrStep<'a> {
+    node: &'a OrNode,
+    string: &'a str,
+    match_len: usize,
+    child_path: Box<Path<'a>>,
+    which: usize,
+}
+
 // Conceptually a Path takes as many steps as it can along the target string. A Path is a series of Steps along a particular branch, from 0 up to
 // the maximum number allowed, or the maximum number matched, whichever is smaller. If continuing the search from the end of the Path fails it
 // backtracks a Step and tries again.
 #[derive(Debug)]
-pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Matching(Vec<MatchingStep<'a>>), And(Vec<AndStep<'a>>) }
+pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Matching(Vec<MatchingStep<'a>>), And(Vec<AndStep<'a>>), Or(OrStep<'a>), None }
 
 //use core::fmt::Debug;
 //impl<'a> Debug for Path<'a> {
@@ -49,8 +60,8 @@ pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Ma
 //}
 
 pub struct Report<'a> {
-    found: &'a str,
-    subreports: Box<Vec<Report<'a>>>,
+    pub found: &'a str,
+    pub subreports: Box<Vec<Report<'a>>>,
 }
 
 impl<'a> Report<'a> {
@@ -73,6 +84,7 @@ impl<'a> Path<'a> {
                                                       .collect())})
                 } else { None }
             },
+            Path::Or(step) => step.child_path.report(),
             _ => None
         }
     }
@@ -110,7 +122,12 @@ impl<'a> Path<'a> {
                 }
                 msg
             },
-//            _=> panic!("TODO")
+            Path::Or(step) => format!("{}or({}): ({}): '{}'",
+                                      pad(indent),
+                                      step.node.nodes.len(),
+                                      step.which,
+                                      self.matched_string()),
+            Path::None => "NONE node (unexpected?)".to_string(),
         }
     }
     pub fn len(&self) -> usize {
@@ -119,7 +136,8 @@ impl<'a> Path<'a> {
             Path::Special(steps) => steps.len(),
             Path::Matching(steps) => steps.len(),
             Path::And(steps) => steps.len(),
-//            _ => 0,
+            Path::Or(step) => step.node.nodes.len() - step.which,
+            Path::None => 0,
         }
     }
     fn match_len(&self) -> usize {
@@ -128,7 +146,8 @@ impl<'a> Path<'a> {
             Path::Special(steps) =>  steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
             Path::Matching(steps) => steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
             Path::And(steps) =>      steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
-            //            _ => &"",
+            Path::Or(step) =>        step.match_len ,
+            Path::None =>            0,
         }
     }
     
@@ -140,7 +159,8 @@ impl<'a> Path<'a> {
             Path::Special(steps) =>  &steps[0].string[0..match_len],
             Path::Matching(steps) => &steps[0].string[0..match_len],
             Path::And(steps) =>      &steps[0].string[0..match_len],
-            //            _ => &"",
+            Path::Or(step) =>        &step.string[0..match_len],
+            Path::None => panic!("NONE unexpected"),
         }
     }
     fn string_end(&self) -> &'a str {
@@ -150,28 +170,31 @@ impl<'a> Path<'a> {
             Path::Special(steps) =>  &steps[0].string[len..],
             Path::Matching(steps) => &steps[0].string[len..],
             Path::And(steps) =>      &steps[0].string[len..],
-            //            _ => &"",
+            Path::Or(step) =>        &step.string[len..],
+            Path::None => panic!("NONE unexpected"),
         }
     }
     fn pop(&mut self) -> bool {
         let limits = self.limits();
         match self {
-            Path::Chars(steps) =>    { steps.pop();},
-            Path::Special(steps) =>  { steps.pop();},
-            Path::Matching(steps) => { steps.pop();},
-            Path::And(steps) =>      { steps.pop();},
-            //            _ => &"",
+            Path::Chars(steps) =>    { let _ = steps.pop();},
+            Path::Special(steps) =>  { let _ = steps.pop();},
+            Path::Matching(steps) => { let _ = steps.pop();},
+            Path::And(steps) =>      { let _ = steps.pop();},
+            Path::Or(step) =>        { step.which += 1; },
+            Path::None => panic!("NONE unexpected"),
         };
-        limits.min < self.len() && self.len() <= limits.max + 1
+        limits.check(self.len()) == 0
     }
     
-    fn limits(&self) -> &'a Limits {
+    fn limits(&self) -> Limits {
         match self {
-            Path::Chars(steps) =>    &steps[0].node.limits,
-            Path::Special(steps) =>  &steps[0].node.limits,
-            Path::Matching(steps) => &steps[0].node.limits,
-            Path::And(steps) =>      &steps[0].node.limits,
-            //            _ => &"",
+            Path::Chars(steps) =>    steps[0].node.limits.clone(),
+            Path::Special(steps) =>  steps[0].node.limits.clone(),
+            Path::Matching(steps) => steps[0].node.limits.clone(),
+            Path::And(steps) =>      steps[0].node.limits.clone(),
+            Path::Or(step) =>        Limits { min: 0, max: step.node.nodes.len() - 1, lazy: false },
+            Path::None =>            Limits { min: 1, max: 0, lazy: false },
         }
     }
     fn trace(self) -> Path<'a> {
@@ -179,7 +202,6 @@ impl<'a> Path<'a> {
         self
     }
 }
-
 // Any way to make walk() generic?
 
 impl<'a> CharsStep<'a> {
@@ -228,7 +250,7 @@ impl<'a> SpecialStep<'a> {
         let string = &self.string[self.match_len..];
         if trace(4) {println!("    -> STEP SPECIAL \"{}\" ({})", self.node.special, abbrev(string));}
         if self.node.matches(string) {
-            let step = SpecialStep {node: self.node, string, match_len: char_bytes(string, char_bytes(string, 1))};
+            let step = SpecialStep {node: self.node, string, match_len: char_bytes(string, 1)};
             if trace(4) {println!("    <- STEP SPECIAL \"{}\" matches \"{}\"", self.node.special, &string[0..step.match_len]);}
             Some(step)
         } else {
@@ -326,7 +348,7 @@ impl<'a> AndStep<'a> {
     }
     
     fn back_off(&mut self) -> bool {
-        if trace(2) { println!("backing off"); }
+        if trace(2) { println!("backing off {}", self.status()); }
         if self.child_paths.is_empty() { return false; }
         loop {
             let last_pathnum = self.child_paths.len() - 1;
@@ -338,6 +360,23 @@ impl<'a> AndStep<'a> {
         !self.child_paths.is_empty()
     }
 }
-    
+                    
+    // OR is a little different: no repeat count, so its step() is not needed
+impl<'a> OrStep<'a> {
+    pub fn walk(node: &'a OrNode, string: &'a str) -> Path<'a> {
+        if trace(2) { println!(" -> WALK OR({}) {}", node.nodes.len(), abbrev(string)); }
+        for which in 0..node.nodes.len() {
+            let child_path = node.nodes[which].walk(string);
+            if child_path.limits().check(child_path.len()) == 0 {
+                let match_len = child_path.match_len();
+                if trace(2) { println!(" <- WALK OR({}), {} branch", node.nodes.len(), which); }
+                return Path::Or(OrStep {node, string, which, child_path: Box::new(child_path), match_len});
+            }
+        }
+        if trace(2) { println!(" <- WALK OR({}), no match", node.nodes.len()); }
+        Path::Or(OrStep {node, string, which: node.nodes.len(), child_path: Box::new(Path::None), match_len: 0})
+    }
+}
+
 const ABBREV_LEN: usize = 5;
 fn abbrev(string: &str) -> String { if string.len() < ABBREV_LEN {format!("\"{}\"", string)} else {format!("\"{}...\"", &string[0..char_bytes(&string, ABBREV_LEN)])} }

@@ -1,3 +1,8 @@
+// TODO:
+// - lazy: implement lazy evaluation
+// - named substrings
+// - refactor: especially in WALK there seems to be a lot of repeat code. Using traits I think a lot can be consolidated
+// - more special chars: for now it just has \N for numeric and . for any, need to add $, ^, ascii, upper case, lower case, whitespace, ...
 pub mod walk;
 #[cfg(test)]
 mod tests;
@@ -89,8 +94,17 @@ impl Limits {
         }
     }
 
-    // the sizes given here are 0 based, 
-    fn check(&self, size: usize) -> bool { self.min < size && size < self.max + 1 }
+    // Checks if the size falls in the range.
+    // Returns: <0 if NUM is < min; 0 if NUM is in the range min <= NUM <= ,ax (but SEE WARNING BELOW: NUM needs
+    // to be adjusted to account for the 0-match possibility.
+    //
+    //Beware: the input is usize and is in general the length of steps vector.
+    // This has a 0-match in its first position, so the value entered is actually one higher than the allowed value.
+    pub fn check(&self, num: usize) -> isize {
+        if num <= self.min { -1 }
+        else if num <= self.max + 1 { 0 }
+        else { 1 }
+    }
 }
 //
 // These functions parse the reps option from the re source
@@ -141,6 +155,7 @@ impl Node {
             Node::SpecialChar(special_node) => walk::SpecialStep::walk(special_node, string),
             Node::Matching(matching_node) => walk::MatchingStep::walk(matching_node, string),
             Node::And(and_node) => walk::AndStep::walk(and_node, string),
+            Node::Or(or_node) => walk::OrStep::walk(or_node, string),
             _ => panic!("TODO")
         }
     }
@@ -161,16 +176,17 @@ impl Node {
 
     // For the case abc\|XXX, break the preceding "abc" into "ab" and "c" since only the "c" binds with the OR
     fn chars_before_or(nodes: &mut Vec<Node>) {
-        let mut prev = nodes.pop().unwrap();
+        let prev = &nodes[nodes.len() - 1];
         if prev.node_type() == NODE_CHARS {
+            let mut prev = nodes.pop().unwrap();
             let chars_node = prev.chars_mut_ref();
             if chars_node.string.len() > 1 {
                 let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), limits: Limits::default()});
                 nodes.push(prev);
                 nodes.push(new_node);
-            }
-        } else {
-            nodes.push(prev);
+            } else {
+                nodes.push(prev);
+            }                
         }
     }
 
@@ -182,7 +198,7 @@ impl Node {
     //  - In addition, if the preceding node is CHARS and its length is >1 it needs to be split, since the
     //    OR only binds a single character
     fn or_into_and(mut self, nodes: &mut Vec<Node>) {
-        // TODO: check for empty
+        if nodes.len() == 0 { return; }
         Node::chars_before_or(nodes);
         let mut prev = nodes.pop().unwrap();
         match prev.node_type() {
@@ -225,10 +241,16 @@ impl Node {
             _ => panic!("Attempting to get ref to OrNode from wrong Node type")
         }
     }
-    fn chars_ref(&self) -> &CharsNode {
+    fn and_ref(&self) -> &AndNode {
         match self {
-            Node::Chars(node) => node,
-            _ => panic!("Attempting to get ref to OrNode from wrong Node type")
+            Node::And(node) => node,
+            _ => panic!("Attempting to get ref to AndNode from wrong Node type")
+        }
+    }
+    fn chars_ref(&self) -> Option<&CharsNode> {
+        match self {
+            Node::Chars(node) => Some(node),
+            _ => None,
         }
     }
     // thank you rust-lang.org
@@ -311,23 +333,20 @@ pub trait TreeNode {
     fn desc(&self, indent: usize) -> String;
     // looks for a single match, does not care about repeats
     fn matches<'a>(&self, string: &'a str) -> bool { string == "" }
-    fn get_limits(&self) -> Limits;
 }
 
 // CharsNode keeps a string of consecuive characters to look for. Really, it is like an AndNode where each node has a single
 // character, but that seems wasteful/ he sring contains no special chars, and it can have no repeat count unless there is
 // only a single character.
 impl TreeNode for CharsNode {
-    fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits.to_string()) }
     fn matches<'a>(&self, string: &'a str) -> bool { string.starts_with(&self.string) }
 }
 
 impl TreeNode for SpecialCharNode {
-    fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String {
         let slash = if self.special == '.' { "" } else { "\\" };
-        format!("{}SpecialCharNode: '{}{}{}'", pad(indent), slash, self.special, self.limits.to_string())
+        format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits.to_string())
     }
 
     fn matches(&self, string: &str) -> bool {
@@ -342,7 +361,6 @@ impl TreeNode for SpecialCharNode {
     
 // format the limis for debugging
 impl TreeNode for AndNode {
-    fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String {
         let mut msg = format!("{}AndNode {} {}", pad(indent), self.limits.to_string(), if self.report {"report"} else {""});
         for i in 0..self.nodes.len() {
@@ -357,7 +375,6 @@ impl TreeNode for AndNode {
 }
 
 impl TreeNode for OrNode {
-    fn get_limits(&self) -> Limits { Limits::default() }
     fn desc(&self, indent: usize) -> String {
         let mut msg = format!("{}OrNode", pad(indent), );
         for i in 0..self.nodes.len() {
@@ -372,7 +389,6 @@ impl TreeNode for OrNode {
 }
 
 impl TreeNode for MatchingNode {
-    fn get_limits(&self) -> Limits { self.limits.clone() }
     fn desc(&self, indent: usize) -> String {
         format!("{}Matching {}{}", pad(indent), self.targets_string(), self.limits.to_string(), )
     }
@@ -647,7 +663,23 @@ pub fn parse_tree(input: &str) -> Result<Node, String> {
 }
 
 pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
-    let mut start = text; 
+    let mut start = text;
+    // hey, optimization
+    // deosn't save that much time but makes the trace debug easier to read
+    if let Some(node_0) = tree.and_ref().nodes[0].chars_ref() {
+        if node_0.limits.min > 0 {
+            let copy = node_0.string.to_string();
+            match start.find(&copy) {
+                Some(offset) => {
+                    if offset > 0 {
+                        if trace(0) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", node_0.string, offset); }
+                        start = &start[offset..];
+                    }
+                },
+                None => { return None; }
+            }
+        };
+    }
     while start.len() > 0 {
         if trace(0) {println!("\n==== WALK \"{}\" ====", start)};
         let path = tree.walk(start);

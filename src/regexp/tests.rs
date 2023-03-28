@@ -120,3 +120,80 @@ fn matching_basic() {
     assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\N]").unwrap());
 }
 
+
+fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
+    let tree = match parse_tree(re) {
+        Ok(tree) => tree,
+        Err(msg) => panic!("Parse failed for re \"{}\": {}", re, msg),
+    };
+    let path = match walk_tree(&tree, text) {
+        Some(path) => path,
+        None => panic!("Expected \"{}\", didn't find anything", expected)
+    };
+    match path.report() {
+        Some(report) => { if expected != report.found { panic!("re \"{}\" expected \"{}\", found \"{}\"", re, expected, report.found)}},
+        None => panic!("re \"{}\" expected \"{}\", got no match", re, expected)
+    }
+}       
+        
+fn not_find<'a>(re: &'a str, text: &'a str) {
+    let tree = match parse_tree(re) {
+        Ok(tree) => tree,
+        Err(msg) => panic!("Parse failed for re \"{}\": {}", re, msg),
+    };
+    let path = match walk_tree(&tree, text) {
+        Some(path) => path,
+        None => { return; }
+    };
+    match path.report() {
+        Some(report) => panic!("re \"{}\" expected no match, found \"{}\"", re, report.found),
+        None => ()
+    }
+}       
+        
+#[test]
+fn simple_chars() {
+    find("abc", "abcd", "abc");
+    find("bcd", "abcd", "bcd");
+    find("bcd", "abcde", "bcd");
+    not_find("bcd", "abde");
+}
+    
+#[test]
+fn chars_in_and() {
+    find("abc*d", "abcdz", "abcd");
+    find("abc+d", "abcdz", "abcd");
+    find("abc*d", "abccdz", "abccd");
+    find("abc*d", "abdz", "abd");
+    not_find("abc+d", "abd");
+    not_find("abc{2}d", "abcdz");
+    find("abc{2}d", "abccdz", "abccd");
+    not_find("abc{2}d", "abcccdz");
+    find("abc{2,3}d", "abcccdz", "abcccd");
+}
+    
+#[test]
+fn special_chars() {
+    find("ab.de", "aabcdef", "abcde");
+    find("ab.*de", "abcdedefg", "abcdede");
+    not_find("cde.", "abcde");
+    find(".*", "ab1234fg", "ab1234fg");
+    find(r"\N+", "ab1234fg", "1234");
+    find(r"\N*", "ab1234fg", "");
+    find(r"b\N*", "ab1234fg", "b1234");
+}
+    
+#[test]
+fn matching_chars() {
+    find(r"[abc]+", "xabacaacd", "abacaac");
+    find(r"z[abc]*z", "abzzcd", "zz");
+    find(r"z[abc]*z", "abzaabczcd", "zaabcz");
+    not_find(r"z[abc]*z", "abzaabcdzcd");
+    find(r"z[a-m]*z", "abzabclmzxx", "zabclmz");
+    find(r"[a-mz]+", "xyzabclmzxx", "zabclmz");
+}
+
+#[test]
+fn non_matching_chars() {
+    find("a[^e-m]*", "aabcdefghij", "aabcd");
+}
