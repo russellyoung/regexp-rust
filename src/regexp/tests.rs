@@ -1,4 +1,3 @@
-//use super::*;
 use crate::regexp::*;
 
 //
@@ -41,11 +40,13 @@ impl Node {
     }
 }
 
+//
+// parse tests
+//
 #[test]
 fn test_string_simple() {
     let mut node = make_and(1, 1, false, true);
     node.push(make_chars_string("abcd"));
-//    node.push(Node::Success);
     assert_eq!(node, parse_tree("abcd").unwrap());
 }
 
@@ -58,7 +59,6 @@ fn test_string_embedded_reps() {
     node.push(make_chars_single("f", 1, EFFECTIVELY_INFINITE, false));
     node.push(make_chars_string("gh", ));
     node.push(make_chars_single("i", 0, EFFECTIVELY_INFINITE, false));
-//    node.push(Node::Success);
     assert_eq!(node, parse_tree("abc?def+ghi*").unwrap());
 }
               
@@ -72,7 +72,6 @@ fn test_string_embedded_reps_lazy() {
     node.push(make_chars_string("gh", ));
     node.push(make_chars_single("i", 0, EFFECTIVELY_INFINITE, true));
     node.push(make_chars_string("jk", ));
-//    node.push(Node::Success);
     assert_eq!(node, parse_tree("abc??def+?ghi*?jk").unwrap());
 }
               
@@ -86,7 +85,6 @@ fn test_special_in_string() {
     node.push(make_chars_string("gh", ));
     node.push(make_special('.', 1, 3, false));
     node.push(make_chars_string("ij", ));
-//    node.push(Node::Success);
     println!("{:#?}", parse_tree(r"abc.def\N?gh").unwrap());
     assert_eq!(node, parse_tree(r"abc.def\N?gh.{1,3}ij").unwrap());
 }
@@ -100,7 +98,6 @@ fn or_with_chars_bug() {
     or_node.push(make_chars_string("d"));
     node.push(or_node);
     node.push(make_chars_string("ef"));
-//    node.push(Node::Success);
     assert_eq!(node, parse_tree(r"abc\|def").unwrap());
 }
 
@@ -116,41 +113,25 @@ fn set_basic() {
                        Set::RegularChars("lm".to_string()),
                        Set::SpecialChar('N')];
     node.push(make_set(true, targets, 1, 1, false));
-//    node.push(Node::Success);
     assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\N]").unwrap());
 }
 
 
 fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
-    let tree = match parse_tree(re) {
-        Ok(tree) => tree,
-        Err(msg) => panic!("Parse failed for re \"{}\": {}", re, msg),
-    };
-    let path = match walk_tree(&tree, text) {
-        Some(path) => path,
-        None => panic!("Expected \"{}\", didn't find anything", expected)
-    };
-    match path.report() {
-        Some(report) => { if expected != report.found { panic!("re \"{}\" expected \"{}\", found \"{}\"", re, expected, report.found)}},
-        None => panic!("re \"{}\" expected \"{}\", got no match", re, expected)
-    }
+    let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    let path = walk_tree(&tree, text).unwrap_or_else(|| panic!("Expected \"{}\", didn't find anything", expected));
+    let report = path.report().unwrap_or_else(|| panic!("re \"{}\" expected \"{}\", got no match", re, expected));
+    assert_eq!(report.found, expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, report.found);
 }       
         
 fn not_find<'a>(re: &'a str, text: &'a str) {
-    let tree = match parse_tree(re) {
-        Ok(tree) => tree,
-        Err(msg) => panic!("Parse failed for re \"{}\": {}", re, msg),
-    };
-    let path = match walk_tree(&tree, text) {
-        Some(path) => path,
-        None => { return; }
-    };
-    match path.report() {
-        Some(report) => panic!("re \"{}\" expected no match, found \"{}\"", re, report.found),
-        None => ()
-    }
+    let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    assert!(walk_tree(&tree, text).is_none(), "re \"{}\" expected no match, found one", re);
 }       
-        
+
+//
+// walk tests
+//
 #[test]
 fn simple_chars() {
     find("abc", "abcd", "abc");
@@ -159,16 +140,7 @@ fn simple_chars() {
     not_find("bcd", "abde");
 }
     
-#[test]
-fn unicode() {
-    find("abc", "ab你好abcd", "abc");
-    find("你好", "ab你好abcd", "你好");
-    find("你好you-all", "ab你好you-allabcd", "你好you-all");
-    find("a.*a", "qqab你好abcd", "ab你好a");
-}
-
-    
-fn chars_in_and() {
+fn rep_chars() {
     find("abc*d", "abcdz", "abcd");
     find("abc+d", "abcdz", "abcd");
     find("abc*d", "abccdz", "abccd");
@@ -179,6 +151,15 @@ fn chars_in_and() {
     not_find("abc{2}d", "abcccdz");
     find("abc{2,3}d", "abcccdz", "abcccd");
 }
+    
+#[test]
+fn unicode() {
+    find("abc", "ab你好abcd", "abc");
+    find("你好", "ab你好abcd", "你好");
+    find("你好you-all", "ab你好you-allabcd", "你好you-all");
+    find("a.*a", "qqab你好abcd", "ab你好a");
+}
+
     
 #[test]
 fn special_chars() {
@@ -203,5 +184,32 @@ fn set_chars() {
 
 #[test]
 fn non_set_chars() {
+    find("a[^hgf]*", "aabcdefghij", "aabcde");
     find("a[^e-m]*", "aabcdefghij", "aabcd");
+    find("a[^-e-m]*", "xab-cdefghij", "ab");
+    not_find("[^abcd]+", "abcdab");
+}
+
+#[test]
+fn or() {
+    find(r"abc\|de", "xxxabceyy", "abce");
+    find(r"abc\|de", "xxxabdeyy", "abde");
+    find(r"abc\|d", "xxxabdeyy", "abd");
+    find(r"c\|de", "xxxabdeyy", "de");
+    find(r"c\|d", "c", "c");
+    find(r"c\|d", "d", "d");
+    find(r"abc\|d*e", "xxxabceyy", "abce");
+    not_find(r"abc\|d*e", "xxxabcceyy");
+    find(r"abc\|d*e", "xxxabdeyy", "abde");
+    find(r"abc\|d*e", "xxxabeyy", "abe");
+    find(r"abc\|d*e", "xxxabdddeyy", "abddde");
+
+    find(r"\(abc\)\|de", "xxxabcdeyy", "de");
+    find(r"\(abc\)\|de", "xxxabceyy", "abce");
+    find(r"x\(abc\)\|de", "xxxabceyy", "xabce");
+    not_find(r"x\(abc\)\|de", "xxxabeyy");
+    find(r"x\(abc\)+\|\(de\)*d", "xxxabcabcd", "xabcabcd");
+    find(r"x\(abc\)+\|\(de\)*d", "xxxdedededx", "xdededed");
+//    find(r"x\(abc\)+\|\(de\)*d", "xxxdedededee", "xdedededed");
+    find(r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
 }

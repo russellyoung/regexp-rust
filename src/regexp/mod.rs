@@ -8,11 +8,10 @@ pub mod walk;
 mod tests;
 
 use std::str::Chars;
-use crate::trace;
+use crate::{pad, trace};
 
 const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
 const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
-const TAB_INDENT:usize = 2;                     // indent in Debug display
 
 
 #[derive(PartialEq)]
@@ -58,7 +57,8 @@ impl Limits {
             };
         format!("{}{}", code, if self.lazy {" lazy" } else { "" })
     }
-        
+    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"L"} else {""})}
+
     fn parse(chars: &mut Peekable) -> Result<Limits, String> {
         let next = chars.next();
         if next.is_none() { return Ok(Limits::default()); }
@@ -132,7 +132,7 @@ pub const NODE_CHARS:    usize = 0;
 pub const NODE_SPEC:     usize = 1;
 pub const NODE_AND:      usize = 2;
 pub const NODE_OR:       usize = 3;
-pub const NODE_SET: usize = 4;
+pub const NODE_SET:      usize = 4;
 //pub const NODE_SUCCESS:  usize = 5;
 pub const NODE_NONE:     usize = 6;
 
@@ -144,7 +144,7 @@ impl Node {
             Node::SpecialChar(_a) => NODE_SPEC,
             Node::And(_a)         => NODE_AND,
             Node::Or(_a)          => NODE_OR,
-            Node::Set(_a)    => NODE_SET,
+            Node::Set(_a)         => NODE_SET,
             Node::None            => NODE_NONE,
         }
     }
@@ -227,7 +227,7 @@ impl Node {
             Node::SpecialChar(a) => Some(a),
             Node::And(a)         => Some(a),
             Node::Or(a)          => Some(a),
-            Node::Set(a)    => Some(a),
+            Node::Set(a)         => Some(a),
             Node::None           => None,
         }
     }
@@ -701,12 +701,6 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
 fn char_bytes(string: &str, char_count: usize) -> usize {
     let s: String = string.chars().take(char_count).collect();
     s.len()
-}
-
-// helper function to format debug
-fn pad(x: usize) -> String {
-    let pad = TAB_INDENT*x;
-    format!("{:pad$}", "")
 }
 
 //////////////////////////////////////////////////////////////////

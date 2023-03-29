@@ -11,13 +11,25 @@ const INTERACTIVE_DEFAULT: bool = false;
 const PRINTTREE_DEFAULT: bool = false;
 // print debugging messages
 const DEBUG_DEFAULT: u32 = 0;
+const TAB_SIZE:usize = 2;                     // indent in Debug display
 
 // Used for debugging: the function trace(Path) either is a no-op or prints the given path, depending on the command line args
 //static mut trace = |x| { println!("{:#?}", x) };
 // TODO: make this a macro
 static mut TRACE_LEVEL: u32 = 0;
 fn set_trace(level: u32) { unsafe { TRACE_LEVEL = level }}
-pub fn trace(level: u32) -> bool { unsafe { level < TRACE_LEVEL }}
+pub fn trace(level: u32) -> bool { unsafe { level <= TRACE_LEVEL }}
+
+static mut TRACE_INDENT:isize = 0;
+pub fn trace_change_indent(delta: isize) { unsafe {TRACE_INDENT += delta; }}
+pub fn trace_indent() -> String { unsafe { pad(TRACE_INDENT as usize) }}
+
+// helper function to format debug
+fn pad(x: usize) -> String {
+    let pad = TAB_SIZE*x;
+    format!("{:pad$}", "")
+}
+
 // trace 2: print walk enter, walk exit
 // trace 4: print step enter, step exit
 // trace 6: print backoff stuff
