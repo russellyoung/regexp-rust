@@ -16,7 +16,7 @@ There is still a good-sized TODO list:
 
 - implement lazy evaluation
 - implement named capture groups
-- add more special chars - currently only has '.' and '\N' (numeric), should add ^, $, whitespace, uppercase, lowercase...
+- add more special chars - currently only has '.', '^', '$', and '\N' (numeric), should add whitespace, uppercase, lowercase...
 - REFACTOR (most important). Especially in WALK, there is a lot of repeat code that can probably be replaced using traits properly. During development I intentionally did not think much about this. For one thing I was concentrating more on the Rust features needed to implement the types one by one, and I wasn't sure how much overlap there would be (it turned out to be a lot).
 
 It would be really helpful to get some comments on the current design, and my thoughts for using traits. Other things I wonder about:
