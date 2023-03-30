@@ -303,6 +303,7 @@ pub struct AndNode {
     limits: Limits,
     nodes: Vec<Node>,
     report: bool,
+    anchor: bool
 }
 
 // handles A\|B style matches
@@ -345,14 +346,14 @@ impl TreeNode for CharsNode {
 
 impl TreeNode for SpecialCharNode {
     fn desc(&self, indent: usize) -> String {
-        let slash = if self.special == '.' { "" } else { "\\" };
+        let slash = if ".$".contains(self.special) { "" } else { "\\" };
         format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits.display_string())
     }
 
     fn matches(&self, string: &str) -> bool {
         match string.chars().next() {
-            Some(ch) => self.match_char(ch),
-            None => false
+            Some(ch) => self.match_char(ch, string),
+            None => self.special == '$'    // match only end-of-string marker
         }
     }
 
@@ -415,7 +416,9 @@ impl CharsNode {
         loop {
             match chars.peek_2() {
                 (Some(ch0), Some(ch1)) => {
-                    if ch0 == '.' || ch0 == '[' { break; }
+                    // only break on '$' if it is the last char - skip over the trailing '\)'
+                    if '$' == ch0 && chars.peek_n(4)[3].is_none() { break; }
+                    if r".[".contains(ch0) { break; }
                     if ch0 == '\\' {
                         if "()|".contains(ch1) { break; }
                         if CharsNode::ESCAPE_CODES.contains(ch1) { break; }
@@ -427,7 +430,9 @@ impl CharsNode {
                         break;
                     }
                 },
-                (Some(_ch0), None) => { return Err("Bad escape char".to_string()); },
+                (Some(_ch0), None) => {
+                    return Err("Bad escape char".to_string());
+                },
                 _ => { break; }
             }
             chs.push(chars.next().unwrap());
@@ -448,14 +453,15 @@ impl SpecialCharNode {
     // sequences at bat, so no checking is done.
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
         let special = if let Some(ch) = chars.next() {
-            if ch == '.' { '.' }
+            if ".$".contains(ch) { ch }
             else if let Some(_ch1) = chars.peek() { chars.next().unwrap() }   // ch1 is next(), doing it this way gets the same value and pops it off
             else { return Ok(Node::None); }
         } else { return Ok(Node::None); };
         Ok(Node::SpecialChar(SpecialCharNode { special, limits: Limits::parse(chars)?}))
     }
 
-    fn match_char(&self, ch: char) -> bool {
+    fn match_char(&self, ch: char, string: &str) -> bool {
+        println!("match {}, {}", ch, string);
         match self.special {
             'N' => "0123456789".contains(ch),
             '.' => true,
@@ -486,7 +492,7 @@ impl AndNode {
         let _ = chars.next();
         let _ = chars.next();
         Ok(if nodes.is_empty() { Node::None }
-           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, report})})
+           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, report, anchor: false, })})
     }
 }
 
@@ -639,7 +645,7 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
                 OrNode::parse_node(chars)
             }
         }
-    } else if ch0 == '.' {
+    } else if ".$".contains(ch0) {
         SpecialCharNode::parse_node(chars)
         } else {
         CharsNode::parse_node(chars)
@@ -652,12 +658,15 @@ fn parse(chars: &mut Peekable) -> Result<Node, String> {
 // Wraps the in put with "\(...\)" so it becomes an AND node, and sticks the SUCCESS node on the end when done
 pub fn parse_tree(input: &str) -> Result<Node, String> {
     // wrap the string in "\(...\)" to make it an implicit AND node
-    let anchor_front = input.starts_with('$');
+    let anchor_front = input.starts_with('^');
     let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
     chars.push('\\');
     chars.push(')');
-    let outer_and = AndNode::parse_node(&mut chars)?;
-//    let and_node = outer_and.and_mut_ref();
+    let mut outer_and = AndNode::parse_node(&mut chars)?;
+    if anchor_front {
+        let and_node = outer_and.and_mut_ref();
+        and_node.anchor = true;
+    }
     Ok(outer_and)
 }
 
@@ -665,28 +674,33 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
     let mut start = text;
     // hey, optimization
     // deosn't save that much time but makes the trace debug easier to read
-    if let Some(node_0) = tree.and_ref().nodes[0].chars_ref() {
-        if node_0.limits.min > 0 {
-            let copy = node_0.string.to_string();
-            match start.find(&copy) {
-                Some(offset) => {
-                    if offset > 0 {
-                        if trace(0) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", node_0.string, offset); }
-                        start = &start[offset..];
-                    }
-                },
-                None => { return None; }
-            }
-        };
+    let root = tree.and_ref();
+    if !root.anchor {
+        if let Some(node_0) = tree.and_ref().nodes[0].chars_ref() {
+            if node_0.limits.min > 0 {
+                let copy = node_0.string.to_string();
+                match start.find(&copy) {
+                    Some(offset) => {
+                        if offset > 0 {
+                            if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", node_0.string, offset); }
+                            start = &start[offset..];
+                        }
+                    },
+                    None => { return None; }
+                }
+            };
+        }
     }
     while !start.is_empty() {
-        if trace(0) {println!("\n==== WALK \"{}\" ====", start)};
+        if trace(1) {println!("\n==== WALK \"{}\" ====", start)};
         let path = tree.walk(start);
         if path.len() > 1 {
-            if trace(0) { println!("--- Search succeeded ---") };
+            if trace(1) { println!("--- Search succeeded ---") };
             return Some(path);
         }
-        if trace(0) {println!("==== WALK \"{}\": no match ====", start)};
+        if trace(1) {println!("==== WALK \"{}\": no match ====", start)};
+        println!("{:#?}", tree.and_ref());
+        if tree.and_ref().anchor { break; }
         start = &start[char_bytes(start, 1)..];
     }
     None

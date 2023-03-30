@@ -4,9 +4,35 @@ use crate::{trace, trace_indent, trace_change_indent};
 
 // simplifies code a little
 fn ref_last<T>(v: &Vec<T>) -> &T { &v[v.len() - 1] }
-const OR_LIMITS: Limits = Limits{min: 1, max: 1, lazy: false};
 
-// used to hold the state at each step in the search walk, and later to build the final result if successful
+//////////////////////////////////////////////////////////////////
+//
+// Report
+//
+// Used to deliver the results to the caller, a tree of results
+//
+//////////////////////////////////////////////////////////////////
+pub struct Report<'a> {
+    pub found: &'a str,
+    pub subreports: Vec<Report<'a>>,
+}
+
+impl<'a> Report<'a> {
+    pub fn display(&self, indent: usize) {
+        println!("{}\"{}\"", pad(indent), self.found);
+        self.subreports.iter().for_each(move |r| r.display(indent + 1));
+    }
+}
+
+//////////////////////////////////////////////////////////////////
+//
+// Step structs
+//
+// A path through the tree is a vector of steps, where each step is a
+// single match for its node.  The steps are used to walk through the
+// trtee and to build the Report structure for the caller.
+//
+//////////////////////////////////////////////////////////////////
 pub struct CharsStep<'a> {
     node: &'a CharsNode,
     string: &'a str,
@@ -41,29 +67,18 @@ pub struct OrStep<'a> {
     which: usize,
 }
 
-// Conceptually a Path takes as many steps as it can along the target string. A Path is a series of Steps along a particular branch, from 0 up to
-// the maximum number allowed, or the maximum number matched, whichever is smaller. If continuing the search from the end of the Path fails it
-// backtracks a Step and tries again.
+//////////////////////////////////////////////////////////////////
+//
+// Path struct
+//
+// Conceptually a Path takes as many steps as it can along the target
+// string. A Path is a series of Steps along a particular branch, from
+// 0 up to the maximum number allowed, or the maximum number matched,
+// whichever is smaller. If continuing the search from the end of the
+// Path fails it backtracks a Step and tries again.
+//
+//////////////////////////////////////////////////////////////////
 pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Set(Vec<SetStep<'a>>), And(Vec<AndStep<'a>>), Or(OrStep<'a>), None }
-
-//use core::fmt::Debug;
-//impl<'a> Debug for Path<'a> {
-//    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//        write!(f, "{}", self.desc(0))
-//    }
-//}
-
-pub struct Report<'a> {
-    pub found: &'a str,
-    pub subreports: Vec<Report<'a>>,
-}
-
-impl<'a> Report<'a> {
-    pub fn display(&self, indent: usize) {
-        println!("{}\"{}\"", pad(indent), self.found);
-        self.subreports.iter().for_each(move |r| r.display(indent + 1));
-    }
-}
 
 impl<'a> Path<'a> {
     pub fn report(&self) -> Option<Report> {
@@ -81,47 +96,6 @@ impl<'a> Path<'a> {
         }
     }
     
-    pub fn desc(&self, indent: usize) -> String {
-        match self {
-            Path::Chars(steps) => format!("{}chars '{}'{}: reps {}: matched '{}'",
-                                          pad(indent),
-                                          steps[0].node.string,
-                                          steps[0].node.limits.simple_display(),
-                                          steps.len() - 1,
-                                          self.matched_string()),
-            Path::Special(steps) => format!("{}special '{}'{}: reps {}: matched '{}'",
-                                            pad(indent),
-                                            steps[0].node.special,
-                                            steps[0].node.limits.simple_display(),
-                                            steps.len() - 1,
-                                            self.matched_string()),
-            Path::Set(steps) => format!("{}set {}{}: reps {}: matched '{}'", 
-                                            pad(indent),
-                                            steps[0].node.targets_string(),
-                                            steps[0].node.limits.simple_display(),
-                                            steps.len() - 1,
-                                            self.matched_string()),
-            Path::And(steps) => {
-                let mut msg = format!("{}and({})({}): reps {}: matched '{}'",
-                                      pad(indent),
-                                      steps[0].node.nodes.len(),
-                                      steps[0].node.limits.simple_display(),
-                                      steps.len() - 1,
-                                      self.matched_string());
-                let last_step = ref_last(steps);
-                for substep in last_step.child_paths.iter() {
-                    msg.push_str(format!("\n{}", substep.desc(indent + 1)).as_str());
-                }
-                msg
-            },
-            Path::Or(step) => format!("{}or({}): branch {}: matched '{}'",
-                                      pad(indent),
-                                      step.node.nodes.len(),
-                                      step.which,
-                                      self.matched_string()),
-            Path::None => "NONE node (unexpected?)".to_string(),
-        }
-    }
     pub fn len(&self) -> usize {
         match self {
             Path::Chars(steps) => steps.len(),
@@ -175,17 +149,16 @@ impl<'a> Path<'a> {
             Path::None =>            panic!("NONE unexpected"),
             Path::Or(step) =>        {
                 let child_path = &mut step.child_path;
-                if !child_path.pop() {
-                    step.which += 1;
-                }
+                if !child_path.pop() { step.which += 1; }
+                step.match_len = if child_path.len() == 0 {0} else {child_path.match_len()};
             },
             Path::And(steps) =>     {
                 let last = steps.len() - 1;
                 let children = &mut steps[last].child_paths;
                 let len = children.len();
-                if children.is_empty() || !children[len - 1].pop() {
-                    let _ = steps.pop();
-                }
+                if children.is_empty() || !children[len - 1].pop() { let _ = steps.pop(); }
+                // Possible bug: does match_len need to be reset here like it is for OR above? I don't think so, but
+                // it took a while to find it was needed for OR.pop(), so if there is a problem with AND look here first.
             },
         };
         let ret = limits.check(self.len()) == 0;
@@ -213,8 +186,11 @@ impl<'a> Path<'a> {
     }
 }
 
+//////////////////////////////////////////////////////////////////
 //
 // Debug implementations: used for tracing
+//
+//////////////////////////////////////////////////////////////////
 impl<'a> Debug for CharsStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "CHARS \"{}\"{}, string {}", self.node.string, self.node.limits.simple_display(), abbrev(self.string) )
@@ -222,7 +198,7 @@ impl<'a> Debug for CharsStep<'a> {
 }
 impl<'a> Debug for SpecialStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "SPECIAL \"{}\"{}, string {}", self.string, self.node.limits.simple_display(), abbrev(self.string))
+        write!(f, "SPECIAL \"{}\"{}, string {}", self.node.special, self.node.limits.simple_display(), abbrev(self.string))
     }
 }
 impl<'a> Debug for SetStep<'a> {
@@ -248,21 +224,20 @@ impl<'a> Debug for Path<'a> {
         match self {
             Path::Chars(steps) =>    {
                 if steps.is_empty() { write!(f, "CHARS, reps 0, match \"\"") }
-                else {write!(f, "{:?}, reps {}, match \"{}\"", steps[0], self.len(), self.matched_string())}
+                else {write!(f, "{:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
             },
             Path::Special(steps) =>  {
                 if steps.is_empty() { write!(f, "SPECIAL, reps 0, match \"\"") }
-                else { write!(f, "{:?}, reps {}, match \"{}\"", steps[0], self.len(), self.matched_string())}
+                else { write!(f, "{:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
             },
             Path::Set(steps) => {
                 if steps.is_empty() { write!(f, "SET, reps 0, match \"\"") }
-                else {write!(f, "{:?}, reps {}, match \"{}\"", steps[0], self.len(), self.matched_string())}
+                else {write!(f, "{:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
             },
             Path::And(steps) => {
                 if steps.is_empty() { write!(f, "AND, reps 0, match \"\"") }
                 else {
-                    let last = steps.len() - 1;
-                    write!(f, "{:?}, reps {}, match \"{}\"", steps[last], self.len(), self.matched_string())
+                    write!(f, "{:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())
                 }
             },
             Path::Or(step) => write!(f, "{:?}, child reps {}, match \"{}\"", step, step.child_path.len(), self.matched_string()),
@@ -270,6 +245,12 @@ impl<'a> Debug for Path<'a> {
         }
     }
 }
+
+//////////////////////////////////////////////////////////////////
+//
+// Step struct method definitions
+//
+//////////////////////////////////////////////////////////////////
 
 // Any way to make walk() generic?
 impl<'a> CharsStep<'a> {
@@ -289,7 +270,7 @@ impl<'a> CharsStep<'a> {
                 None => break,
             }
         }
-        Path::Chars(steps).trace(1, &"end walk")
+        Path::Chars(steps).trace(1, "end walk")
     }
     // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
     fn step(&self) -> Option<CharsStep<'a>> {
@@ -319,7 +300,7 @@ impl<'a> SpecialStep<'a> {
                 None => { break; }
             }
         }
-        Path::Special(steps).trace(1, &"end walk")
+        Path::Special(steps).trace(1, "end walk")
     }
     fn step (&self) -> Option<SpecialStep<'a>> {
         let string = &self.string[self.match_len..];
@@ -349,7 +330,7 @@ impl<'a> SetStep<'a> {
                 None => { break; }
             }
         }
-        Path::Set(steps).trace(1, &"end walk")
+        Path::Set(steps).trace(1, "end walk")
     }
     fn step (&self) -> Option<SetStep<'a>> {
         let string = &self.string[self.match_len..];
@@ -379,7 +360,7 @@ impl<'a> AndStep<'a> {
                 None => { break; }
             }
         }
-        Path::And(steps).trace(1, &"end walk")
+        Path::And(steps).trace(1, "end walk")
     }
 
 /*
@@ -445,10 +426,10 @@ impl<'a> OrStep<'a> {
             let child_path = node.nodes[which].walk(string);
             if child_path.limits().check(child_path.len()) == 0 {
                 let match_len = child_path.match_len();
-                return Path::Or(OrStep {node, string, which, child_path: Box::new(child_path), match_len}).trace(1, &"end walk");
+                return Path::Or(OrStep {node, string, which, child_path: Box::new(child_path), match_len}).trace(1, "end walk");
             }
         }
-        Path::Or(OrStep {node, string, which: node.nodes.len(), child_path: Box::new(Path::None), match_len: 0}).trace(1, &"end walk")
+        Path::Or(OrStep {node, string, which: node.nodes.len(), child_path: Box::new(Path::None), match_len: 0}).trace(1, "end walk")
     }
 //    fn status(&self) -> String {
 //        format!("    OR({}) which: {} reps: {}", self.node.nodes.len(), self.which, self.child_path.len())
@@ -456,9 +437,11 @@ impl<'a> OrStep<'a> {
 
 }
 
-const ABBREV_LEN: usize = 5;
+// helper function to keep strings from being too long.
+pub fn set_abbrev_size(size: u32) { unsafe {ABBREV_LEN = size as usize; }}
+static mut ABBREV_LEN: usize = 5;
 fn abbrev(string: &str) -> String {
-    let s:String = string.chars().take(ABBREV_LEN).collect();
+    let s:String = string.chars().take(unsafe {ABBREV_LEN}).collect();
     let dots = if s.len() == string.len() {""} else {"..."};
     format!("\"{}\"{}", s, dots)
 }

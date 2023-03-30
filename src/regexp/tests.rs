@@ -1,5 +1,4 @@
 use crate::regexp::*;
-
 //
 // Initial tests are basic sanity tests for the tree parser. They are relatively simple because the
 // search tests (TODO) will provide more complete testing. These are intended mainly as a sanity check
@@ -17,7 +16,7 @@ fn make_special(special: char, min: usize, max: usize, lazy: bool) -> Node {
 }
 
 fn make_and(min: usize, max: usize, lazy: bool, report: bool) -> Node {
-    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, report})
+    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, report, anchor: false})
 }
 fn make_or() -> Node {
     Node::Or(OrNode{nodes: Vec::<Node>::new(), })
@@ -170,6 +169,13 @@ fn special_chars() {
     find(r"\N+", "ab1234fg", "1234");
     find(r"\N*", "ab1234fg", "");
     find(r"b\N*", "ab1234fg", "b1234");
+    not_find(r"xxx$", "abcxxxy");
+    find(r"xxx$", "abcxxx", "xxx");
+    find(r"xxx$z", "abcxxx$zx", "xxx$z");
+    find(r"^abc", "abcdef", "abc");
+    not_find(r"^abc", "xabcdef");
+    find(r"a^bc", "xa^bcdef", "a^bc");
+    
 }
     
 #[test]
@@ -210,6 +216,6 @@ fn or() {
     not_find(r"x\(abc\)\|de", "xxxabeyy");
     find(r"x\(abc\)+\|\(de\)*d", "xxxabcabcd", "xabcabcd");
     find(r"x\(abc\)+\|\(de\)*d", "xxxdedededx", "xdededed");
-//    find(r"x\(abc\)+\|\(de\)*d", "xxxdedededee", "xdedededed");
+    // this one caught a bug
     find(r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
 }
