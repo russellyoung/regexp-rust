@@ -8,13 +8,12 @@ That leads into this second project. I wrote a [regexp search program in C](http
 
 ### _The current state_
 
-I'm pleased to say it is basically working. "Basically" here means the main functions are working, at least as far as I've tested them. The main functions are AND, OR, CHAR_MATCH, SPECIAL_MATCH (\N, ', etc.), and SET ([a-z], etc.) all work. Unicode seems to work, at least simple stuff - I know it can get complicated, but basic simple unicode strings (containing hanzi) While it is not fully tested, since the last few bugs were found all tests seems to work on the first try, so while there may still be minor bugs in the code the design looks solid.
+I'm pleased to say it is wroking pretty well. I still need to add more tests and play with more complicated expressions, but most of it has been done and seems to work. A good sign is that new tests added tend to work the first time without needing to fix anything. All syntax is working, and from the earlier TODO list I've added support for special characters $ and ^, and also lazy evaluation. A list of features that have been added and I have reason to believe might be working: parsing all expression types, unicode, and lazy evaluation. 
 
 ### _TODO_
 
-There is still a good-sized TODO list:
+There is still a TODO list (smaller than before):
 
-- implement lazy evaluation
 - implement named capture groups
 - add more special chars - currently only has '.', '^', '$', and '\N' (numeric), should add whitespace, uppercase, lowercase...
 - REFACTOR (most important). Especially in WALK, there is a lot of repeat code that can probably be replaced using traits properly. During development I intentionally did not think much about this. For one thing I was concentrating more on the Rust features needed to implement the types one by one, and I wasn't sure how much overlap there would be (it turned out to be a lot).
@@ -26,6 +25,5 @@ It would be really helpful to get some comments on the current design, and my th
 - I think a well designed trait would let me make all the Path enums contents use the dyn trait rather than different objects. This would minimize the need for all those Path methofs that just distribute messages to their struct content. I looked into this briefly at one poin but ran into issues and wen back to the simpler way.
 - Maybe moving Limits from the Steps to the Path would simplify things.
 - If I do unify the Step objects with a Walk trait I wonder what that does to my trace system. I guess the messages could be added as functions in the trait, for instance "trace_enter_walk()"
-- lazy evaluation is very similar to greedy, it differs only in the initial walk is to the minimum rather than the maximum, and the backoff() method does a step rather than pops off a step. I suppose supplying whole new methods for it would work, but there must be a cleverer way to do it.
 
 Comments welcomed and encouraged. I promise to think about everything that comes in.

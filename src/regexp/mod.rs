@@ -105,6 +105,8 @@ impl Limits {
         else if num <= self.max + 1 { 0 }
         else { 1 }
     }
+    
+    pub fn initial_walk_limit(&self) -> usize { if self.lazy {self.min} else { self.max}}
 }
 //
 // These functions parse the reps option from the re source

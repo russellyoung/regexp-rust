@@ -219,3 +219,15 @@ fn or() {
     // this one caught a bug
     find(r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
 }
+
+#[test]
+fn lazy() {
+    find(r"abc*", "xabccc", "abccc");
+    find(r"abc*?", "xabccc", "ab");
+    find(r"abc+?", "xabccc", "abc");
+    find(r"abc*?d", "xabcccd", "abcccd");
+    find(r"abc+?d", "xabcccd", "abcccd");
+    find(r"abc+d", "xabcccd", "abcccd");
+    find(r"a\(bcd\)+?bc", "abcdbcdbcd", "abcdbc");
+    find(r"a\(bcd\)+bc", "abcdbcdbcd", "abcdbcdbc");
+}

@@ -141,31 +141,43 @@ impl<'a> Path<'a> {
         }
     }
     fn pop(&mut self) -> bool {
+        if let Path::And(steps) = self {
+            let last = steps.len() - 1;
+            let children = &mut steps[last].child_paths;
+            let len = children.len();
+            if !children.is_empty() && children[len - 1].pop() { return true; }
+        };
         let limits = self.limits();
+        if limits.lazy { return self.lazy_pop(); }
         match self {
             Path::Chars(steps) =>    { let _ = steps.pop(); },
             Path::Special(steps) =>  { let _ = steps.pop();},
             Path::Set(steps) =>      { let _ = steps.pop();},
+            Path::And(steps) =>      { let _ = steps.pop();},
             Path::None =>            panic!("NONE unexpected"),
             Path::Or(step) =>        {
                 let child_path = &mut step.child_path;
                 if !child_path.pop() { step.which += 1; }
                 step.match_len = if child_path.len() == 0 {0} else {child_path.match_len()};
             },
-            Path::And(steps) =>     {
-                let last = steps.len() - 1;
-                let children = &mut steps[last].child_paths;
-                let len = children.len();
-                if children.is_empty() || !children[len - 1].pop() { let _ = steps.pop(); }
-                // Possible bug: does match_len need to be reset here like it is for OR above? I don't think so, but
-                // it took a while to find it was needed for OR.pop(), so if there is a problem with AND look here first.
-            },
         };
         let ret = limits.check(self.len()) == 0;
         if trace(1) { println!("{}backoff: {:?}, success: {}", trace_indent(), self, ret)}
         ret
     }
-    
+
+    fn lazy_pop(&mut self) -> bool {
+        self.limits().check(self.len() + 1) == 0
+            && match self {
+                Path::Chars(steps) =>    { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
+                Path::Special(steps) =>  { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
+                Path::Set(steps) =>      { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
+                Path::And(steps) =>      { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
+                Path::None =>            panic!("NONE unexpected"),
+                Path::Or(_step) =>       panic!("OR unexpected"),
+            }
+    }
+
     fn limits(&self) -> Limits {
         match self {
             Path::Chars(steps) =>    steps[0].node.limits,
@@ -261,7 +273,7 @@ impl<'a> CharsStep<'a> {
             println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
             trace_change_indent(2);
         }
-        for _i in 1..=node.limits.max {
+        for _i in 1..=node.limits.initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
                     if trace(2) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
@@ -291,7 +303,7 @@ impl<'a> SpecialStep<'a> {
             println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
             trace_change_indent(2);
         }
-        for _i in 1..=node.limits.max {
+        for _i in 1..=node.limits.initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
                     if trace(2) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
@@ -321,7 +333,7 @@ impl<'a> SetStep<'a> {
             println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
             trace_change_indent(2);
         }
-        for _i in 1..=node.limits.max {
+        for _i in 1..=node.limits.initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
                     if trace(2) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
@@ -351,7 +363,7 @@ impl<'a> AndStep<'a> {
             println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
             trace_change_indent(2);
         }
-        for _i in 1..=node.limits.max {
+        for _i in 1..=node.limits.initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
                     if trace(2) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
@@ -386,8 +398,7 @@ impl<'a> AndStep<'a> {
             let string = if child_len == 0 { step.string }
             else {ref_last(&step.child_paths).string_end()};
             let child_path = step.node.nodes[child_len].walk(string);
-            let child_limits = child_path.limits();
-            if child_limits.min  < child_path.len() {
+            if child_path.limits().check(child_path.len()) == 0 {
                 step.child_paths.push(child_path);
                 if trace(3) {
                     trace_change_indent(-2);
