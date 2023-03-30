@@ -38,25 +38,6 @@ impl Default for Limits {
 }
 
 impl Limits {
-    fn display_string(self) -> String {
-        let code = 
-            if self.min == 0 {
-                if self.max == 1 { "?".to_string() }
-                else if self.max >= EFFECTIVELY_INFINITE { "*".to_string() }
-                else { format!("{{0,{}}}", self.max) }
-            } else if self.min == 1 {
-                if self.max >= EFFECTIVELY_INFINITE { "+".to_string() }
-                else if self.max == 1 { "".to_string() }
-                else { format!("{{1,{}}}", self.max) }
-            } else if self.min == self.max {
-                format!("{{{}}}", self.min)
-            } else if self.max < EFFECTIVELY_INFINITE {
-                format!("{{{},{}}}", self.min, self.max)
-            } else {
-                format!("{{{},}}", self.min)
-            };
-        format!("{}{}", code, if self.lazy {" lazy" } else { "" })
-    }
     fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"L"} else {""})}
 
     fn parse(chars: &mut Peekable) -> Result<Limits, String> {
@@ -183,7 +164,7 @@ impl Node {
             let mut prev = nodes.pop().unwrap();
             let chars_node = prev.chars_mut_ref();
             if chars_node.string.len() > 1 {
-                let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), limits: Limits::default()});
+                let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), lims: Limits::default()});
                 nodes.push(prev);
                 nodes.push(new_node);
             } else {
@@ -207,11 +188,13 @@ impl Node {
             NODE_OR => {
                 let prev_node = prev.or_mut_ref();
                 prev_node.push(self);
+                prev_node.lims.max += 1;
                 nodes.push(prev);
             },
             _ => {
                 let or_node = self.or_mut_ref();
                 or_node.push_front(prev);
+                or_node.lims.max += 1;
                 nodes.push(self);
             }
         }
@@ -288,21 +271,21 @@ impl Node {
 // Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
 #[derive(Default, Debug, PartialEq)]
 pub struct CharsNode {
-    limits: Limits,
+    lims: Limits,
     string: String,
 }
 
-// handles special characters like ".", \N, etc.
+// handles special characters like ".", \d, etc.
 #[derive(Default, Debug, PartialEq)]
 pub struct SpecialCharNode {
-    limits: Limits,
+    lims: Limits,
     special: char,
 }
 
 // handles AND (sequential) matches
 #[derive(Default, Debug, PartialEq)]
 pub struct AndNode {
-    limits: Limits,
+    lims: Limits,
     nodes: Vec<Node>,
     report: bool,
     anchor: bool
@@ -311,15 +294,16 @@ pub struct AndNode {
 // handles A\|B style matches
 #[derive(Default, PartialEq, Debug)]
 pub struct OrNode {
-    // No reps for OR node, to repeat it has to be surrounded by an AND
-    // limit: Limit,
     nodes: Vec<Node>,
+    // Limits for OR nodes are different than the others. ORs cannot be repeated (except by enclosing them in
+    // an AND), so Limits is used for OR to move through the different branches rather than the different repetitions
+    lims: Limits,
 }
 
 // handles [a-z] style matches
 #[derive(Default, PartialEq, Debug)]
 pub struct SetNode {
-    limits: Limits,
+    lims: Limits,
     targets: Vec<Set>,
     not: bool,
 }
@@ -336,36 +320,39 @@ pub trait TreeNode {
     fn desc(&self, indent: usize) -> String;
     // looks for a single match, does not care about repeats
     fn matches(&self, string: &str) -> bool { string.is_empty() }
+    fn limits(&self) -> Limits;
 }
 
 // CharsNode keeps a string of consecuive characters to look for. Really, it is like an AndNode where each node has a single
 // character, but that seems wasteful/ he sring contains no special chars, and it can have no repeat count unless there is
 // only a single character.
 impl TreeNode for CharsNode {
-    fn desc(&self, indent: usize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits.display_string()) }
+    fn desc(&self, indent: usize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits().simple_display()) }
     fn matches(&self, string: &str) -> bool { string.starts_with(&self.string) }
+    fn limits(&self) -> Limits { self.lims }
 }
 
 impl TreeNode for SpecialCharNode {
     fn desc(&self, indent: usize) -> String {
         let slash = if ".$".contains(self.special) { "" } else { "\\" };
-        format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits.display_string())
+        format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits().simple_display())
     }
 
     fn matches(&self, string: &str) -> bool {
         match string.chars().next() {
-            Some(ch) => self.match_char(ch, string),
+            Some(ch) => self.match_char(ch),
             None => self.special == '$'    // match only end-of-string marker
         }
     }
 
+    fn limits(&self) -> Limits { self.lims }
 }
 
     
 // format the limis for debugging
 impl TreeNode for AndNode {
     fn desc(&self, indent: usize) -> String {
-        let mut msg = format!("{}AndNode {} {}", pad(indent), self.limits.display_string(), if self.report {"report"} else {""});
+        let mut msg = format!("{}AndNode {} {}", pad(indent), self.limits().simple_display(), if self.report {"report"} else {""});
         for i in 0..self.nodes.len() {
             let disp_str = match self.nodes[i].tree_node() {
                 Some(node) => node.desc(indent + 1),
@@ -375,11 +362,12 @@ impl TreeNode for AndNode {
         }
         msg
     }
+    fn limits(&self) -> Limits { self.lims }
 }
 
 impl TreeNode for OrNode {
     fn desc(&self, indent: usize) -> String {
-        let mut msg = format!("{}OrNode", pad(indent), );
+        let mut msg = format!("{}OrNode{}", pad(indent), self.limits().simple_display());
         for i in 0..self.nodes.len() {
             let disp_str = match self.nodes[i].tree_node() {
                 Some(node) => node.desc(indent + 1),
@@ -389,12 +377,14 @@ impl TreeNode for OrNode {
         }
         msg
     }
+    fn limits(&self) -> Limits { self.lims }
 }
 
 impl TreeNode for SetNode {
     fn desc(&self, indent: usize) -> String {
-        format!("{}Set {}{}", pad(indent), self.targets_string(), self.limits.display_string(), )
+        format!("{}Set {}{}", pad(indent), self.targets_string(), self.limits().simple_display(), )
     }
+    fn limits(&self) -> Limits { self.lims }
 }
 
 
@@ -411,7 +401,7 @@ impl TreeNode for SetNode {
 impl CharsNode {
     // These characters have meaning when escaped, break for them. Otherwise just delete the '/' from the string
     // TODO: get the right codes
-    const ESCAPE_CODES: &str = "SN()n|";
+    const ESCAPE_CODES: &str = "dula()|";
 
     fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
         let mut chs = Vec::<char>::new();
@@ -441,10 +431,10 @@ impl CharsNode {
         }
         Ok(if chs.is_empty() { Node::None }
            else {
-               let limits = if chs.len() == 1 { Limits::parse(chars)? } else { Limits::default() };
+               let lims = if chs.len() == 1 { Limits::parse(chars)? } else { Limits::default() };
                Node::Chars(CharsNode {
                    string: chs.into_iter().collect(),
-                   limits
+                   lims
                })
            })
     }
@@ -459,14 +449,16 @@ impl SpecialCharNode {
             else if let Some(_ch1) = chars.peek() { chars.next().unwrap() }   // ch1 is next(), doing it this way gets the same value and pops it off
             else { return Ok(Node::None); }
         } else { return Ok(Node::None); };
-        Ok(Node::SpecialChar(SpecialCharNode { special, limits: Limits::parse(chars)?}))
+        Ok(Node::SpecialChar(SpecialCharNode { special, lims: Limits::parse(chars)?}))
     }
 
-    fn match_char(&self, ch: char, string: &str) -> bool {
-        println!("match {}, {}", ch, string);
+    fn match_char(&self, ch: char) -> bool {
         match self.special {
-            'N' => "0123456789".contains(ch),
-            '.' => true,
+            '.' => true,                        // all
+            'd' => '0' <= ch && ch <= '9',      // numeric
+            'l' => 'a' <= ch && ch <= 'z',      // lc ascii
+            'u' => 'A' <= ch && ch <= 'Z',      // uc ascii
+            'a' => ' ' <= ch && ch <= '~',      // ascii printable
             _ => false
         }
     }
@@ -494,7 +486,7 @@ impl AndNode {
         let _ = chars.next();
         let _ = chars.next();
         Ok(if nodes.is_empty() { Node::None }
-           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, report, anchor: false, })})
+           else { Node::And(AndNode {nodes, lims: Limits::parse(chars)?, report, anchor: false, })})
     }
 }
 
@@ -509,7 +501,11 @@ impl OrNode {
             node.chars_after_or(chars);
             nodes.push(node);
         }
-        Ok( Node::Or(OrNode {nodes,}))
+        Ok(Node::Or(OrNode {nodes, lims: Limits {min: 0, max: 0, lazy: false}}))
+    }
+    fn fix_limits(&mut self) {
+        let max = self.nodes.len() - 1;
+        self.lims = Limits {min: 0, max, lazy: false};
     }
 }
 
@@ -539,7 +535,7 @@ impl SetNode {
         // eiher None or ']'
         if let Some(ch) = chars.next() { if ch != ']' {return Err("Unterminated Set".to_string()); } };
         Ok(if targets.is_empty() { Node::None }
-           else { Node::Set( SetNode {targets, not, limits: Limits::parse(chars)?}) })
+           else { Node::Set( SetNode {targets, not, lims: Limits::parse(chars)?}) })
     }
     
     fn matches(&self, string: &str) -> bool {
@@ -558,18 +554,6 @@ impl SetNode {
 // TODO: maybe combine single chars into String so can use contains() to ge all at once?
 #[derive(Debug,PartialEq)]
 enum Set {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
-
-/*
-impl Debug for Set {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Set::Range(ch0, ch1) => write!(f, "[{} - {}]", ch0, ch1),
-            Set::RegularChars(string) => write!(f, "{}", string),
-            Set::SpecialChar(ch) => write!(f, "\\{}", ch),
-        }
-    }
-}
- */
 
 impl Set {
     fn desc(&self) -> String {
@@ -679,7 +663,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
     let root = tree.and_ref();
     if !root.anchor {
         if let Some(node_0) = tree.and_ref().nodes[0].chars_ref() {
-            if node_0.limits.min > 0 {
+            if node_0.limits().min > 0 {
                 let copy = node_0.string.to_string();
                 match start.find(&copy) {
                     Some(offset) => {
@@ -701,7 +685,6 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
             return Some(path);
         }
         if trace(1) {println!("==== WALK \"{}\": no match ====", start)};
-        println!("{:#?}", tree.and_ref());
         if tree.and_ref().anchor { break; }
         start = &start[char_bytes(start, 1)..];
     }

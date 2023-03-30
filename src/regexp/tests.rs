@@ -6,28 +6,30 @@ use crate::regexp::*;
 //
 
 fn make_chars_string(string: &'static str) -> Node {
-    Node::Chars(CharsNode{string: string.to_string(), limits: Limits{min: 1, max: 1, lazy: false}})
+    Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min: 1, max: 1, lazy: false}})
 }
 fn make_chars_single(string: &'static str, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Chars(CharsNode{string: string.to_string(), limits: Limits{min, max, lazy}})
+    Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min, max, lazy}})
 }
 fn make_special(special: char, min: usize, max: usize, lazy: bool) -> Node {
-    Node::SpecialChar(SpecialCharNode {special, limits: Limits {min, max, lazy}})
+    Node::SpecialChar(SpecialCharNode {special, lims: Limits {min, max, lazy}})
 }
 
 fn make_and(min: usize, max: usize, lazy: bool, report: bool) -> Node {
-    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, report, anchor: false})
+    Node::And(AndNode{nodes: Vec::<Node>::new(), lims: Limits{min, max, lazy}, report, anchor: false})
 }
 fn make_or() -> Node {
-    Node::Or(OrNode{nodes: Vec::<Node>::new(), })
+    Node::Or(OrNode{nodes: Vec::<Node>::new(), lims: Limits::default()})
 }
 
 fn make_set(not: bool, targets: Vec<Set>, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Set(SetNode{not, targets, limits: Limits{min, max, lazy}})
+    Node::Set(SetNode{not, targets, lims: Limits{min, max, lazy}})
 }
 fn push_sets(set_node: &mut SetNode, sets: &mut Vec<Set>) {
     set_node.targets.append(sets);
 }
+
+fn make_or_limits(node: &mut OrNode) { node.lims = Limits { min: 0, max: node.nodes.len() - 1, lazy: false }; }
 
 impl Node {
     fn push(&mut self, node: Node) {
@@ -80,12 +82,12 @@ fn test_special_in_string() {
     node.push(make_chars_string("abc"));
     node.push(make_special('.', 1, 1, false));
     node.push(make_chars_string("def", ));
-    node.push(make_special('N', 0, 1, false));
+    node.push(make_special('d', 0, 1, false));
     node.push(make_chars_string("gh", ));
     node.push(make_special('.', 1, 3, false));
     node.push(make_chars_string("ij", ));
-    println!("{:#?}", parse_tree(r"abc.def\N?gh").unwrap());
-    assert_eq!(node, parse_tree(r"abc.def\N?gh.{1,3}ij").unwrap());
+    println!("{:#?}", parse_tree(r"abc.def\d?gh").unwrap());
+    assert_eq!(node, parse_tree(r"abc.def\d?gh.{1,3}ij").unwrap());
 }
     
 #[test]
@@ -95,6 +97,7 @@ fn or_with_chars_bug() {
     let mut or_node = make_or();
     or_node.push(make_chars_string("c"));
     or_node.push(make_chars_string("d"));
+    make_or_limits(or_node.or_mut_ref());
     node.push(or_node);
     node.push(make_chars_string("ef"));
     assert_eq!(node, parse_tree(r"abc\|def").unwrap());
@@ -110,9 +113,9 @@ fn set_basic() {
     let targets = vec![Set::RegularChars("h".to_string()),
                        Set::Range('i', 'k'),
                        Set::RegularChars("lm".to_string()),
-                       Set::SpecialChar('N')];
+                       Set::SpecialChar('d')];
     node.push(make_set(true, targets, 1, 1, false));
-    assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\N]").unwrap());
+    assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\d]").unwrap());
 }
 
 
@@ -166,9 +169,9 @@ fn special_chars() {
     find("ab.*de", "abcdedefg", "abcdede");
     not_find("cde.", "abcde");
     find(".*", "ab1234fg", "ab1234fg");
-    find(r"\N+", "ab1234fg", "1234");
-    find(r"\N*", "ab1234fg", "");
-    find(r"b\N*", "ab1234fg", "b1234");
+    find(r"\d+", "ab1234fg", "1234");
+    find(r"\d*", "ab1234fg", "");
+    find(r"b\d*", "ab1234fg", "b1234");
     not_find(r"xxx$", "abcxxxy");
     find(r"xxx$", "abcxxx", "xxx");
     find(r"xxx$z", "abcxxx$zx", "xxx$z");

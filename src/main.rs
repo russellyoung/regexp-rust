@@ -39,6 +39,31 @@ fn pad(x: usize) -> String {
 /// 	
 /// The search has two phases, in the first phase it parses the regexp to get a regexp tree, and in the
 /// second it walks the tree trying to find a path covering all the nodes.
+///
+/// The basic regular expression syntax is like elisp:
+///  - non-special characters match themselves
+///  - special characters:
+///    - ^ (only at front of RE): matches the beginning of the string
+///    - $ (only at end of RE): matches the end of the string
+///    - .: matches everything
+///    - \N: matches digits
+///  - ranges: [abx-z] matches any character in the brackets. Ranges are supported, so the previous range matches any of a, b, x, y, z
+///  - not ranges: [^ab] matches any character not in the brackets. Ranges are supported, so [^abx-z] matches any character but a, b, x, y, z
+///  - and groups: \(...\) takes everything inside the escaped parens as a sub-regular expression.
+///  - or groups: A\|B matches either the regular expression A or the regular expression B
+///
+/// In addition, any unit can be modified by following it with a repetition code. The codes are:
+///  - *: match any number of times from 0 up
+///  - +: match any number of times from 1 up
+///  - ?: match 0 or 1 repitition
+///  - {N}: match exactly N times
+///  - {N,}: match N or more times
+///  - {N,M}: match any number of repititions from M to N
+///
+/// By default this uses a greedy search algorithm: it always matches as many times as possible and backs off if needed.
+/// Any repetition code can be directed to use a lazy algorithm by suffixing it with '?'. (ie "*?, +?, ??, etc.) Lazy
+/// evaluation evaluates it th esmallest number of times and then adds a new step if the first path does not complete.
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, verbatim_doc_comment)]
 pub struct Config {
