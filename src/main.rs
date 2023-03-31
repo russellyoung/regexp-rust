@@ -110,8 +110,8 @@ fn main() {
     // execution starts
     let tree = match regexp::parse_tree(&config.re) {
         Ok(node) => node,
-        Err(msg) => {
-            println!("Error parsing regexp: {}", msg);
+        Err(error) => {
+            println!("{}", error);
             return;
         },
     };
@@ -121,8 +121,9 @@ fn main() {
     if !config.text.is_empty() {
         let result = regexp::walk_tree(&tree, &config.text);
         match result {
-            Some(path) => { if let Some(report) = path.report() { report.display(0); } else {println!("{}", path.matched_string());} },
-            None => println!("No match"),
+            Ok(Some(path)) => { if let Some(report) = path.report() { report.display(0); } else {println!("{}", path.matched_string());} },
+            Ok(None) => println!("No match"),
+            Err(error) => println!("{}", error)
         }
     }
 }

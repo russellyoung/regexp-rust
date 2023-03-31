@@ -6,7 +6,7 @@ use crate::regexp::*;
 //
 
 fn make_chars_string(string: &'static str) -> Node {
-    Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min: 1, max: 1, lazy: false}})
+        Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min: 1, max: 1, lazy: false}})
 }
 fn make_chars_single(string: &'static str, min: usize, max: usize, lazy: bool) -> Node {
     Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min, max, lazy}})
@@ -41,6 +41,39 @@ impl Node {
     }
 }
 
+//
+// test Limits: parse all modes, confirm check() works. Also kind of tests Peekable
+//
+#[test]
+fn limits_test() {
+    let limits_string = " ? * + {2} {3,5} {6,} ?? *? +? {2}? {3,5}? {6,}? ";
+    let data: [(usize, usize, bool); 13] = [(1, 1, false),
+                                            (0, 1, false),
+                                            (0, EFFECTIVELY_INFINITE, false),
+                                            (1, EFFECTIVELY_INFINITE, false),
+                                            (2, 2, false),
+                                            (3, 5, false),
+                                            (6, EFFECTIVELY_INFINITE, false),
+                                            (0, 1, true),
+                                            (0, EFFECTIVELY_INFINITE, true),
+                                            (1, EFFECTIVELY_INFINITE, true),
+                                            (2, 2, true),
+                                            (3, 5, true),
+                                            (6, EFFECTIVELY_INFINITE, true),
+    ];
+    let mut chars = Peekable::new(limits_string); 
+    for (min, max, lazy) in data {
+        if let Ok(limits) = Limits::parse(&mut chars) {
+            assert!(chars.next().unwrap() == ' ', "unexpected parse results");
+            assert!(limits.check(min) < 0, "< min check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.check(min + 1) == 0, "= min check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.check(max + 1) == 0, "= max check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.check(max + 2) > 0, "> max check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.lazy == lazy, "lazy check failed for ({}, {}, {})", min, max, lazy);
+        } else { panic!("failed parsing Limits"); }
+    }
+    assert!(chars.next() == None, "Failed to consume test string");
+}
 //
 // parse tests
 //
@@ -121,14 +154,14 @@ fn set_basic() {
 
 fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
     let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let path = walk_tree(&tree, text).unwrap_or_else(|| panic!("Expected \"{}\", didn't find anything", expected));
+    let path = walk_tree(&tree, text).unwrap_or_else(|_| panic!("Expected \"{}\", didn't find anything", expected)).unwrap();
     let report = path.report().unwrap_or_else(|| panic!("re \"{}\" expected \"{}\", got no match", re, expected));
     assert_eq!(report.found, expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, report.found);
 }       
         
 fn not_find<'a>(re: &'a str, text: &'a str) {
     let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    assert!(walk_tree(&tree, text).is_none(), "re \"{}\" expected no match, found one", re);
+    assert!(walk_tree(&tree, text).unwrap().is_none(), "re \"{}\" expected no match, found one", re);
 }       
 
 //
@@ -160,6 +193,7 @@ fn unicode() {
     find("你好", "ab你好abcd", "你好");
     find("你好you-all", "ab你好you-allabcd", "你好you-all");
     find("a.*a", "qqab你好abcd", "ab你好a");
+    find(r"是很*好", "这是很很很好",  "是很很很好");
 }
 
     
@@ -234,4 +268,20 @@ fn lazy() {
     find(r"abc+d", "xabcccd", "abcccd");
     find(r"a\(bcd\)+?bc", "abcdbcdbcd", "abcdbc");
     find(r"a\(bcd\)+bc", "abcdbcdbcd", "abcdbcdbc");
+}
+
+fn e_check(re: &str, ecode: usize) {
+    match parse_tree(re) {
+        Ok(_) => panic!("Expected error parsing \"{}\", didn't get it", re),
+        Err(error) => assert!(error.code == ecode, "Parsing \"{}\", expected error {}, found error {} ({})", re, ecode, error.code, error.msg),
+    }
+}
+    
+#[test]
+fn errors() {
+    e_check(r"abc\(de", 2);
+    e_check(r"abc[de", 4);
+    e_check(r"asd\)as", 5);
+    e_check(r"asd{as", 10);
+    e_check(r"asd{4as", 12);
 }

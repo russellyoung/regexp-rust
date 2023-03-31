@@ -9,7 +9,7 @@ mod tests;
 
 use std::str::Chars;
 use crate::{pad, trace};
-use core::fmt::Debug;
+use core::fmt::{Debug,};
 
 const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
 const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
@@ -22,13 +22,17 @@ const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap
 // made it hard to keep track of what was what, eventually I thought if using enums as wrapper. That makes passing
 // things around conveneint, though it does require some way ofgetting back the TreeNode object. I've looked at
 // making all the Node types hold dyn TreeNode, which would make fetching them easier, but there still do seem to
-// be some places where I need to access the full object.
+// be some places where I need to access the full object. It looks like a problem with using enums as Box is that
+// the size must be set at compile time and that cannot be done for traits
+//
+// I also considered using a union for the contents - that is another way besides trait of having the same contents
+// type for everything. I think that would work well, but in the end I don't see a big advantage over using enums.
 //
 //////////////////////////////////////////////////////////////////
 #[derive(PartialEq)]
 pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Set(SetNode), None, }
 
-impl Debug for Node {
+impl core::fmt::Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", if let Some(node) = self.tree_node() { node.desc(0) } else { "None".to_string() })
     }
@@ -43,7 +47,7 @@ impl Node {
             Node::Set(set_node) => walk::SetStep::walk(set_node, string),
             Node::And(and_node) => walk::AndStep::walk(and_node, string),
             Node::Or(or_node) => walk::OrStep::walk(or_node, string),
-            _ => panic!("TODO")
+            Node::None => panic!("NONE node should not be in final tree")
         }
     }
 
@@ -66,7 +70,7 @@ impl Node {
     fn mut_chars_ref(&mut self)-> &mut CharsNode { if let Node::Chars(node) = self { node } else { panic!("Trying for mut ref to CharsNode from wrong Node type"); } }
 
     //
-    // Following are to fix special cases in building the tree. If I could redesign regexps they wouldn't be needed, but
+    // Following are to handle special cases in building the tree. If I could redesign regexps they wouldn't be needed, but
     // to get the right behavior sometimes special tweaking is needed.
     //
     
@@ -95,7 +99,11 @@ impl Node {
             }                
         }
     }
-
+    fn trace(self) -> Self {
+        if trace(2) { println!("Created {:?}", self); }
+        self
+    }
+        
     // This handles the case where an OR is being inserted ino an AND.
     //  - If the preceding node is an OR this OR node gets discarded and its condition is appended to the
     //    existing one.
@@ -210,7 +218,7 @@ impl TreeNode for SpecialCharNode {
 // format the limis for debugging
 impl TreeNode for AndNode {
     fn desc(&self, indent: usize) -> String {
-        let mut msg = format!("{}AndNode {} {}", pad(indent), self.limits().simple_display(), if self.report {"report"} else {""});
+        let mut msg = format!("{}AndNode({}) {} {}", pad(indent), self.nodes.len(), self.limits().simple_display(), if self.report {"report"} else {""});
         for i in 0..self.nodes.len() {
             let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
             msg.push_str(format!("\n{}", disp_str).as_str());
@@ -255,7 +263,7 @@ impl CharsNode {
     // TODO: get the right codes
     const ESCAPE_CODES: &str = "dula()|";
 
-    fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
+    fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let mut chs = Vec::<char>::new();
         loop {
             match chars.peek_2() {
@@ -275,13 +283,13 @@ impl CharsNode {
                     }
                 },
                 (Some(_ch0), None) => {
-                    return Err("Bad escape char".to_string());
+                    return Err(Error::make(1, "Bad escape char"));
                 },
                 _ => { break; }
             }
             chs.push(chars.next().unwrap());
         }
-        Ok(if chs.is_empty() { Node::None }
+        Ok(if chs.is_empty() { Node::None.trace() }
            else {
                let lims = if chs.len() == 1 { Limits::parse(chars)? } else { Limits::default() };
                Node::Chars(CharsNode {
@@ -295,7 +303,7 @@ impl CharsNode {
 impl SpecialCharNode {
     // called with pointer at a special character. Char can be '.' or "\*". For now I'm assuming this only gets called with special
     // sequences at bat, so no checking is done.
-    fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
+    fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let special = if let Some(ch) = chars.next() {
             if ".$".contains(ch) { ch }
             else if let Some(_ch1) = chars.peek() { chars.next().unwrap() }   // ch1 is next(), doing it this way gets the same value and pops it off
@@ -319,13 +327,13 @@ impl SpecialCharNode {
 impl AndNode {
     fn push(&mut self, node: Node) { self.nodes.push(node); }
 
-    fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
+    fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let report = chars.peek().unwrap_or('x') != '?';
         if !report { let _ = chars.next(); }
         let mut nodes = Vec::<Node>::new();
         loop {
             let (ch0, ch1) = chars.peek_2();
-            if ch0.is_none() { return Err("Unterminated AND node".to_string()); }
+            if ch0.is_none() { return Err(Error::make(2, "Unterminated AND node")); }
             if ch0.unwrap() == '\\' && ch1.unwrap_or('x') == ')' { break; }
             let node = parse(chars)?;
             match node {
@@ -345,7 +353,7 @@ impl AndNode {
 impl OrNode {
     fn push(&mut self, node: Node) { self.nodes.push(node); }
     fn push_front(&mut self, node: Node) { self.nodes.insert(0, node); }
-    fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
+    fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let mut nodes = Vec::<Node>::new();
         let mut node = parse(chars)?;
         if !node.is_none() {
@@ -364,7 +372,7 @@ impl OrNode {
 impl SetNode {
     fn push(&mut self, set: Set) { self.targets.push(set); }
     
-    fn parse_node(chars: &mut Peekable) -> Result<Node, String> {
+    fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let mut targets = Vec::<Set>::new();
         let mut not = false;
         if let Some(ch) = chars.peek() {
@@ -385,7 +393,7 @@ impl SetNode {
         }
         
         // eiher None or ']'
-        if let Some(ch) = chars.next() { if ch != ']' {return Err("Unterminated Set".to_string()); } };
+        if let Some(ch) = chars.next() { if ch != ']' {return Err(Error::make(3, "Unterminated Set")); } };
         Ok(if targets.is_empty() { Node::None }
            else { Node::Set( SetNode {targets, not, lims: Limits::parse(chars)?}) })
     }
@@ -416,9 +424,10 @@ impl Set {
             Set::Empty => "*EMPTY*".to_string(),
         }
     }
-    fn parse_next(chars: &mut Peekable) -> Result<Set, String> {
-        Ok(match chars.peek_2() {
-            (Some(ch0), Some(ch1)) => {
+    fn parse_next(chars: &mut Peekable) -> Result<Set, Error> {
+        let peeks = chars.peek_n(3);
+        Ok(match (peeks[0], peeks[1], peeks[2]) {
+            (Some(ch0), Some(ch1), Some(_ch2)) => {
                 if ch1 == '-'{
                     Set::Range(chars.next().unwrap(), (chars.next(), chars.next().unwrap()).1)
                 } else if ch0 == '\\' {
@@ -431,13 +440,13 @@ impl Set {
                                 if ch0 == ']' || ch0 == '\\' || ch1 == '-' { break; }
                                 string.push(chars.next().unwrap());
                             },
-                            _ => { return Err("Unterminated set block".to_string()); },
+                            _ => { return Err(Error::make(4, "Unterminated set block"));},
                         }
                     }
                     if string.is_empty() {Set::Empty} else {Set::RegularChars(string)}
                 }
             }
-            _ => Set::Empty,
+            _ => {return Err(Error::make(4, "Unterminated set block"));},
         })
     }
     fn matches(&self, ch: char) -> bool {
@@ -448,6 +457,104 @@ impl Set {
             Set::Empty => false,
         }
     }
+}
+
+//////////////////////////////////////////////////////////////////
+//
+// parse()
+//
+// This gets its own section because it is the core of the tree parser. It peeks at the
+// next char or so, decides what it is, and calls the proper parse_node to parse the enext node.
+//
+//////////////////////////////////////////////////////////////////
+
+fn parse(chars: &mut Peekable) -> Result<Node, Error> {
+    let (ch0, ch1) = chars.peek_2();
+    if ch0.is_none() { return Ok(Node::None); }
+    let ch0 = ch0.unwrap();
+    let ch1 = ch1.unwrap_or(' ');  // SPACE isn't in any special character sequence
+    if ch0 == '[' {
+        let _ = chars.next();
+        SetNode::parse_node(chars)
+    } else if ch0 == '\\' {
+        if ch1 != '(' && ch1 != '|' {
+            if ch1 == '\\' { CharsNode::parse_node(chars) }
+            else { SpecialCharNode::parse_node(chars) }
+        } else {
+            let _ = chars.next();
+            let _ = chars.next();
+            if ch1 == '(' { AndNode::parse_node(chars) }
+            else { OrNode::parse_node(chars) }
+        }
+    } else if ".$".contains(ch0) { SpecialCharNode::parse_node(chars) }
+    else { CharsNode::parse_node(chars) }
+}
+
+//
+// Main entry point for parsing tree
+//
+// Wraps the in put with "\(...\)" so it becomes an AND node, and sticks the SUCCESS node on the end when done
+pub fn parse_tree(input: &str) -> Result<Node, Error> {
+    // wrap the string in "\(...\)" to make it an implicit AND node
+    let anchor_front = input.starts_with('^');
+    let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
+    chars.push('\\');
+    chars.push(')');
+    let mut outer_and = AndNode::parse_node(&mut chars)?;
+    if anchor_front {
+        let and_node = outer_and.mut_and_ref();
+        and_node.anchor = true;
+    }
+    match chars.next() {
+        Some(_) => Err(Error::make(5, "Extra characters after parse completed")),
+        None => Ok(outer_and),
+    }
+}
+
+pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<walk::Path<'a>>, Error> {
+    let mut start = text;
+    // hey, optimization
+    // deosn't save that much time but makes the trace debug easier to read
+    let root = {if let Node::And(r) = tree { r } else { return Err(Error::make(6, "Root of tree should be Node::And")); }};
+    if !root.anchor {
+        if let Node::Chars(node_0) = &root.nodes[0] {
+            if node_0.limits().min > 0 {
+                let copy = node_0.string.to_string();
+                match start.find(&copy) {
+                    Some(offset) => {
+                        if offset > 0 {
+                            if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", node_0.string, offset); }
+                            start = &start[offset..];
+                        }
+                    },
+                    None => { return Ok(None); }
+                }
+            };
+        }
+    }
+    while !start.is_empty() {
+        if trace(1) {println!("\n==== WALK \"{}\" ====", start)};
+        let path = tree.walk(start);
+        if path.len() > 1 {
+            if trace(1) { println!("--- Search succeeded ---") };
+            return Ok(Some(path));
+        }
+        if trace(1) {println!("==== WALK \"{}\": no match ====", start)};
+        if root.anchor { break; }
+        start = &start[char_bytes(start, 1)..];
+    }
+    Ok(None)
+}
+//////////////////////////////////////////////////////////////////
+//
+// Helper functions
+//
+//////////////////////////////////////////////////////////////////
+
+// gets the number of bytes in a sring of unicode characters
+fn char_bytes(string: &str, char_count: usize) -> usize {
+    let s: String = string.chars().take(char_count).collect();
+    s.len()
 }
 
 //////////////////////////////////////////////////////////////////
@@ -473,7 +580,7 @@ impl Default for Limits {
 impl Limits {
     fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"L"} else {""})}
 
-    fn parse(chars: &mut Peekable) -> Result<Limits, String> {
+    fn parse(chars: &mut Peekable) -> Result<Limits, Error> {
         let next = chars.next();
         if next.is_none() { return Ok(Limits::default()); }
         let next = next.unwrap();
@@ -490,10 +597,10 @@ impl Limits {
         Ok(Limits{min, max, lazy})
     }
 
-    fn parse_ints(chars: &mut Peekable) -> Result<(usize, usize), String> {
+    fn parse_ints(chars: &mut Peekable) -> Result<(usize, usize), Error> {
         let num = read_int(chars);
         let peek = chars.next();
-        if num.is_none() || peek.is_none(){ return Err("Unterminated repetition block".to_string()); }
+        if num.is_none() || peek.is_none(){ return Err(Error::make(10, "Unterminated repetition block")); }
         let num = num.unwrap();
         match peek.unwrap() {
             '}'=> Ok((num, num)),
@@ -501,10 +608,10 @@ impl Limits {
                 let n2 = if let Some(n) = read_int(chars) { n }
                 else { EFFECTIVELY_INFINITE };
                 let terminate = chars.next();
-                if terminate.unwrap_or('x') != '}' {Err("Malformed repetition block error 1".to_string())}
+                if terminate.unwrap_or('x') != '}' {Err(Error::make(11, "Malformed repetition block error 1"))}
                 else {Ok((num, n2))}
             },
-            _ => Err("Malformed repetition block error 2".to_string())
+            _ => Err(Error::make(12, "Malformed repetition block error 2"))
         }
     }
 
@@ -512,8 +619,10 @@ impl Limits {
     // Returns: <0 if NUM is < min; 0 if NUM is in the range min <= NUM <= ,ax (but SEE WARNING BELOW: NUM needs
     // to be adjusted to account for the 0-match possibility.
     //
-    //Beware: the input is usize and is in general the length of steps vector.
+    // Beware: the input is usize and is in general the length of steps vector.
     // This has a 0-match in its first position, so the value entered is actually one higher than the allowed value.
+    // I considered subtracting 1 from the number to make it match, but because the arg is usize and is sometimes 0
+    // it is better to leave it like this.
     pub fn check(&self, num: usize) -> isize {
         if num <= self.min { -1 }
         else if num <= self.max + 1 { 0 }
@@ -546,110 +655,6 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
 
 //////////////////////////////////////////////////////////////////
 //
-// parse()
-//
-// This gets its own section because it is the core of the tree parser. It peeks at the
-// next char or so, decides what it is, and calls the proper parse_node to parse the enext node.
-//
-//////////////////////////////////////////////////////////////////
-
-fn parse(chars: &mut Peekable) -> Result<Node, String> {
-    let (ch0, ch1) = chars.peek_2();
-    if ch0.is_none() { return Ok(Node::None); }
-    let ch0 = ch0.unwrap();
-    let ch1 = ch1.unwrap_or(' ');  // SPACE isn't in any special character sequence
-    if ch0 == '[' {
-        let _ = chars.next();
-        SetNode::parse_node(chars)
-    } else if ch0 == '\\' {
-        if ch1 != '(' && ch1 != '|' {
-            if ch1 == '\\' {
-                CharsNode::parse_node(chars)
-            } else {
-                SpecialCharNode::parse_node(chars)
-            }
-        } else {
-            let _ = chars.next();
-            let _ = chars.next();
-            if ch1 == '(' {
-                AndNode::parse_node(chars)
-            } else {
-                OrNode::parse_node(chars)
-            }
-        }
-    } else if ".$".contains(ch0) {
-        SpecialCharNode::parse_node(chars)
-        } else {
-        CharsNode::parse_node(chars)
-    }
-}
-
-//
-// Main entry point for parsing tree
-//
-// Wraps the in put with "\(...\)" so it becomes an AND node, and sticks the SUCCESS node on the end when done
-pub fn parse_tree(input: &str) -> Result<Node, String> {
-    // wrap the string in "\(...\)" to make it an implicit AND node
-    let anchor_front = input.starts_with('^');
-    let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
-    chars.push('\\');
-    chars.push(')');
-    let mut outer_and = AndNode::parse_node(&mut chars)?;
-    if anchor_front {
-        let and_node = outer_and.mut_and_ref();
-        and_node.anchor = true;
-    }
-    Ok(outer_and)
-}
-
-pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
-    let mut start = text;
-    // hey, optimization
-    // deosn't save that much time but makes the trace debug easier to read
-    let root = {if let Node::And(r) = tree { r } else { panic!("Root of tree should be Node::And") }};
-    if !root.anchor {
-        if let Node::Chars(node_0) = &root.nodes[0] {
-            if node_0.limits().min > 0 {
-                let copy = node_0.string.to_string();
-                match start.find(&copy) {
-                    Some(offset) => {
-                        if offset > 0 {
-                            if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", node_0.string, offset); }
-                            start = &start[offset..];
-                        }
-                    },
-                    None => { return None; }
-                }
-            };
-        }
-    }
-    while !start.is_empty() {
-        if trace(1) {println!("\n==== WALK \"{}\" ====", start)};
-        let path = tree.walk(start);
-        if path.len() > 1 {
-            if trace(1) { println!("--- Search succeeded ---") };
-            return Some(path);
-        }
-        if trace(1) {println!("==== WALK \"{}\": no match ====", start)};
-        if root.anchor { break; }
-        start = &start[char_bytes(start, 1)..];
-    }
-    None
-}
-//////////////////////////////////////////////////////////////////
-//
-// Helper functions
-//
-//////////////////////////////////////////////////////////////////
-
-// gets the number of bytes in a sring of unicode characters
-fn char_bytes(string: &str, char_count: usize) -> usize {
-    let s: String = string.chars().take(char_count).collect();
-    s.len()
-}
-
-//////////////////////////////////////////////////////////////////
-//
 // Peekable
 //
 // This is an iterator with added features to make linear parsing of the regexp string easier:
@@ -661,7 +666,7 @@ fn char_bytes(string: &str, char_count: usize) -> usize {
 //////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
-pub struct Peekable<'a> {
+struct Peekable<'a> {
     chars: Chars<'a>,
     peeked: Vec<char>,
     trailer: Vec<char>,
@@ -737,3 +742,19 @@ impl<'a> Peekable<'a> {
 
 }
 
+#[derive(Debug)]
+pub struct Error {
+    pub msg: String,
+    pub code: usize,
+}
+
+impl Error {
+    fn make(code: usize, msg: &str,) -> Error { Error{code, msg: msg.to_string()}}
+}
+
+impl core::fmt::Display for Error {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "Error:{}: {}", self.code, self.msg)
+    }
+}
