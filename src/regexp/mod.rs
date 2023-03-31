@@ -9,129 +9,33 @@ mod tests;
 
 use std::str::Chars;
 use crate::{pad, trace};
+use core::fmt::Debug;
 
 const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
 const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
 
-
+//////////////////////////////////////////////////////////////////
+//
+// Node
+//
+// Nodes act as a container to hold the TreeNodes that make up the tree. At first I used Box for everything but that
+// made it hard to keep track of what was what, eventually I thought if using enums as wrapper. That makes passing
+// things around conveneint, though it does require some way ofgetting back the TreeNode object. I've looked at
+// making all the Node types hold dyn TreeNode, which would make fetching them easier, but there still do seem to
+// be some places where I need to access the full object.
+//
+//////////////////////////////////////////////////////////////////
 #[derive(PartialEq)]
 pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Set(SetNode), None, }
-use core::fmt::Debug;
+
 impl Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", match self {
-            Node::None => "None".to_string(),
-            _ => self.tree_node().unwrap().desc(0)
-        })
+        write!(f, "{}", if let Some(node) = self.tree_node() { node.desc(0) } else { "None".to_string() })
     }
 }
-
-#[derive(Debug,Clone,Copy,PartialEq)] 
-pub struct Limits {
-    min: usize,
-    max: usize,
-    lazy: bool,
-}
-
-impl Default for Limits {
-    fn default() -> Limits { Limits{min: 1, max: 1, lazy: false} }
-}
-
-impl Limits {
-    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"L"} else {""})}
-
-    fn parse(chars: &mut Peekable) -> Result<Limits, String> {
-        let next = chars.next();
-        if next.is_none() { return Ok(Limits::default()); }
-        let next = next.unwrap();
-        let (min, max): (usize, usize) = match next {
-            '*' => (0, EFFECTIVELY_INFINITE),
-            '+' => (1, EFFECTIVELY_INFINITE),
-            '?' => (0, 1),
-            '{' => Limits::parse_ints(chars)?,
-            _ => { chars.put_back(next); return Ok(Limits::default()) },
-        };
-        let qmark = chars.peek();
-        let lazy = qmark.unwrap_or('x') == '?';
-        if lazy { let _ = chars.next(); }
-        Ok(Limits{min, max, lazy})
-    }
-
-    fn parse_ints(chars: &mut Peekable) -> Result<(usize, usize), String> {
-        let num = read_int(chars);
-        let peek = chars.next();
-        if num.is_none() || peek.is_none(){ return Err("Unterminated repetition block".to_string()); }
-        let num = num.unwrap();
-        match peek.unwrap() {
-            '}'=> Ok((num, num)),
-            ','=> {
-                let n2 = if let Some(n) = read_int(chars) { n }
-                else { EFFECTIVELY_INFINITE };
-                let terminate = chars.next();
-                if terminate.unwrap_or('x') != '}' {Err("Malformed repetition block error 1".to_string())}
-                else {Ok((num, n2))}
-            },
-            _ => Err("Malformed repetition block error 2".to_string())
-        }
-    }
-
-    // Checks if the size falls in the range.
-    // Returns: <0 if NUM is < min; 0 if NUM is in the range min <= NUM <= ,ax (but SEE WARNING BELOW: NUM needs
-    // to be adjusted to account for the 0-match possibility.
-    //
-    //Beware: the input is usize and is in general the length of steps vector.
-    // This has a 0-match in its first position, so the value entered is actually one higher than the allowed value.
-    pub fn check(&self, num: usize) -> isize {
-        if num <= self.min { -1 }
-        else if num <= self.max + 1 { 0 }
-        else { 1 }
-    }
-    
-    pub fn initial_walk_limit(&self) -> usize { if self.lazy {self.min} else { self.max}}
-}
-//
-// These functions parse the reps option from the re source
-//
-
-fn read_int(chars: &mut Peekable) -> Option<usize> {
-    let mut num: usize = 0;
-    let mut any = false;
-    loop {
-        let digit = chars.next();
-        if digit.is_none() { break; }
-        let digit = digit.unwrap();
-        if !('0'..='9').contains(&digit) {
-            chars.put_back(digit);
-            break;
-        }
-        any = true;
-        num = num*10 + (digit as usize) - ('0' as usize);
-    }
-    if any { Some(num) } else { None }
-}
-
-
-pub const NODE_CHARS:    usize = 0;
-pub const NODE_SPEC:     usize = 1;
-pub const NODE_AND:      usize = 2;
-pub const NODE_OR:       usize = 3;
-pub const NODE_SET:      usize = 4;
-//pub const NODE_SUCCESS:  usize = 5;
-pub const NODE_NONE:     usize = 6;
 
 impl Node {
-    fn is_none(&self) -> bool { self.node_type() == NODE_NONE }
-    fn node_type(&self) -> usize{
-        match self {
-            Node::Chars(_a)       => NODE_CHARS,
-            Node::SpecialChar(_a) => NODE_SPEC,
-            Node::And(_a)         => NODE_AND,
-            Node::Or(_a)          => NODE_OR,
-            Node::Set(_a)         => NODE_SET,
-            Node::None            => NODE_NONE,
-        }
-    }
-
+    fn is_none(&self) -> bool { *self == Node::None }
     fn walk<'a>(&'a self, string: &'a str) -> walk::Path<'a> {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, string),
@@ -142,6 +46,25 @@ impl Node {
             _ => panic!("TODO")
         }
     }
+
+    // Get the node object from inside its enum wrapper
+    fn tree_node(&self) -> Option<&dyn TreeNode> {
+        match self {
+            Node::Chars(a)       => Some(a),
+            Node::SpecialChar(a) => Some(a),
+            Node::And(a)         => Some(a),
+            Node::Or(a)          => Some(a),
+            Node::Set(a)         => Some(a),
+            Node::None           => None,
+        }
+    }
+    // These are for internal use, not API, so any bad call is a programming error, not a user error. That is why tey
+    // panic rather than return Option
+    // thank you rust-lang.org
+    fn mut_or_ref(&mut self)   -> &mut OrNode    { if let Node::Or(node)    = self { node } else { panic!("Trying for mut ref to OrNode from wrong Node type"); } }
+    fn mut_and_ref(&mut self)  -> &mut AndNode   { if let Node::And(node)   = self { node } else { panic!("Trying for mut ref to AndNode from wrong Node type"); } }
+    fn mut_chars_ref(&mut self)-> &mut CharsNode { if let Node::Chars(node) = self { node } else { panic!("Trying for mut ref to CharsNode from wrong Node type"); } }
+
     //
     // Following are to fix special cases in building the tree. If I could redesign regexps they wouldn't be needed, but
     // to get the right behavior sometimes special tweaking is needed.
@@ -159,10 +82,10 @@ impl Node {
 
     // For the case abc\|XXX, break the preceding "abc" into "ab" and "c" since only the "c" binds with the OR
     fn chars_before_or(nodes: &mut Vec<Node>) {
-        let prev = &nodes[nodes.len() - 1];
-        if prev.node_type() == NODE_CHARS {
+        let prev_is_chars = {if let Node::Chars(_) = &nodes[nodes.len() - 1] { true } else { false }};
+        if prev_is_chars {
             let mut prev = nodes.pop().unwrap();
-            let chars_node = prev.chars_mut_ref();
+            let chars_node = prev.mut_chars_ref();
             if chars_node.string.len() > 1 {
                 let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), lims: Limits::default()});
                 nodes.push(prev);
@@ -184,85 +107,20 @@ impl Node {
         if nodes.is_empty() { return; }
         Node::chars_before_or(nodes);
         let mut prev = nodes.pop().unwrap();
-        match prev.node_type() {
-            NODE_OR => {
-                let prev_node = prev.or_mut_ref();
-                prev_node.push(self);
-                prev_node.lims.max += 1;
-                nodes.push(prev);
-            },
-            _ => {
-                let or_node = self.or_mut_ref();
+        if let Node::Or(_) = prev {
+            let mut prev_node = prev.mut_or_ref();
+            prev_node.push(self);
+            prev_node.lims.max += 1;
+            nodes.push(prev);
+        } else {
+            let or_node = self.mut_or_ref();
                 or_node.push_front(prev);
                 or_node.lims.max += 1;
                 nodes.push(self);
-            }
-        }
-    }
-
-    //
-    // Access Node content structs
-    //
-    
-    // this gets a reference to the enclosed data as an immutable TreeNode. To get a ref to the object itself
-    // use (or add) the methods below
-    fn tree_node(&self) -> Option<&dyn TreeNode> {
-        match self {
-            Node::Chars(a)       => Some(a),
-            Node::SpecialChar(a) => Some(a),
-            Node::And(a)         => Some(a),
-            Node::Or(a)          => Some(a),
-            Node::Set(a)         => Some(a),
-            Node::None           => None,
-        }
-    }
-    // following are methods to access the different types by ref, muable and immutable. I wonder if it is possible
-    // for a single templae to handle all cases?
-    // These are for internal use, not API, so any bad call is a programming error, not a user error. That is why tey
-    // panic rather than return Option
-    fn or_ref(&self) -> &OrNode {
-        match self {
-            Node::Or(node) => node,
-            _ => panic!("Attempting to get ref to OrNode from wrong Node type")
-        }
-    }
-    fn and_ref(&self) -> &AndNode {
-        match self {
-            Node::And(node) => node,
-            _ => panic!("Attempting to get ref to AndNode from wrong Node type")
-        }
-    }
-    fn chars_ref(&self) -> Option<&CharsNode> {
-        match self {
-            Node::Chars(node) => Some(node),
-            _ => None,
-        }
-    }
-    // thank you rust-lang.org
-    fn or_mut_ref(&mut self) -> &mut OrNode {
-        match self {
-            Node::Or(or_node) => or_node,
-            _ => panic!("Attempting to get mut ref to OrNode from wrong Node type")
-        }
-    }
-    fn and_mut_ref(&mut self)->&mut AndNode {
-        match self {
-            Node::And(and_node) => and_node,
-            _ => panic!("Attempting to get mut ref to AndNode from wrong Node type")
-        }
-    }
-    fn chars_mut_ref(&mut self)->&mut CharsNode {
-        match self {
-            Node::Chars(chars_node) => chars_node,
-            _ => panic!("Attempting to get mut ref to CharsNode from wrong Node type")
         }
     }
 }
 
-//
-// Treenodes are the structs used to build the parse tree. It is constructed in the first pass and then used
-// to walk the search string in a second pass
-//
 //
 // Node structure definitions: these all implement TreeNode
 //
@@ -354,10 +212,7 @@ impl TreeNode for AndNode {
     fn desc(&self, indent: usize) -> String {
         let mut msg = format!("{}AndNode {} {}", pad(indent), self.limits().simple_display(), if self.report {"report"} else {""});
         for i in 0..self.nodes.len() {
-            let disp_str = match self.nodes[i].tree_node() {
-                Some(node) => node.desc(indent + 1),
-                None => format!("{:?}", self.nodes[i]),
-            };
+            let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
             msg.push_str(format!("\n{}", disp_str).as_str());
         }
         msg
@@ -369,10 +224,7 @@ impl TreeNode for OrNode {
     fn desc(&self, indent: usize) -> String {
         let mut msg = format!("{}OrNode{}", pad(indent), self.limits().simple_display());
         for i in 0..self.nodes.len() {
-            let disp_str = match self.nodes[i].tree_node() {
-                Some(node) => node.desc(indent + 1),
-                None => format!("{:?}", self.nodes[i]),
-            };
+            let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
             msg.push_str(format!("\n{}", disp_str).as_str());
         }
         msg
@@ -476,9 +328,9 @@ impl AndNode {
             if ch0.is_none() { return Err("Unterminated AND node".to_string()); }
             if ch0.unwrap() == '\\' && ch1.unwrap_or('x') == ')' { break; }
             let node = parse(chars)?;
-            match node.node_type() {
-                NODE_NONE => (),
-                NODE_OR => node.or_into_and(&mut nodes),
+            match node {
+                Node::None => (),
+                Node::Or(_) => node.or_into_and(&mut nodes),
                 _ => nodes.push(node),
             }
         }
@@ -600,6 +452,100 @@ impl Set {
 
 //////////////////////////////////////////////////////////////////
 //
+// LIMITS
+//
+// Used to handle the number of reps allowed for a Node. Besides holding the min, max, and lazy data,
+// it also handles other related questions, like whether a node falls in the allowed range, or how
+// far the initial walk should go
+//
+//////////////////////////////////////////////////////////////////
+#[derive(Debug,Clone,Copy,PartialEq)] 
+pub struct Limits {
+    min: usize,
+    max: usize,
+    lazy: bool,
+}
+
+impl Default for Limits {
+    fn default() -> Limits { Limits{min: 1, max: 1, lazy: false} }
+}
+
+impl Limits {
+    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"L"} else {""})}
+
+    fn parse(chars: &mut Peekable) -> Result<Limits, String> {
+        let next = chars.next();
+        if next.is_none() { return Ok(Limits::default()); }
+        let next = next.unwrap();
+        let (min, max): (usize, usize) = match next {
+            '*' => (0, EFFECTIVELY_INFINITE),
+            '+' => (1, EFFECTIVELY_INFINITE),
+            '?' => (0, 1),
+            '{' => Limits::parse_ints(chars)?,
+            _ => { chars.put_back(next); return Ok(Limits::default()) },
+        };
+        let qmark = chars.peek();
+        let lazy = qmark.unwrap_or('x') == '?';
+        if lazy { let _ = chars.next(); }
+        Ok(Limits{min, max, lazy})
+    }
+
+    fn parse_ints(chars: &mut Peekable) -> Result<(usize, usize), String> {
+        let num = read_int(chars);
+        let peek = chars.next();
+        if num.is_none() || peek.is_none(){ return Err("Unterminated repetition block".to_string()); }
+        let num = num.unwrap();
+        match peek.unwrap() {
+            '}'=> Ok((num, num)),
+            ','=> {
+                let n2 = if let Some(n) = read_int(chars) { n }
+                else { EFFECTIVELY_INFINITE };
+                let terminate = chars.next();
+                if terminate.unwrap_or('x') != '}' {Err("Malformed repetition block error 1".to_string())}
+                else {Ok((num, n2))}
+            },
+            _ => Err("Malformed repetition block error 2".to_string())
+        }
+    }
+
+    // Checks if the size falls in the range.
+    // Returns: <0 if NUM is < min; 0 if NUM is in the range min <= NUM <= ,ax (but SEE WARNING BELOW: NUM needs
+    // to be adjusted to account for the 0-match possibility.
+    //
+    //Beware: the input is usize and is in general the length of steps vector.
+    // This has a 0-match in its first position, so the value entered is actually one higher than the allowed value.
+    pub fn check(&self, num: usize) -> isize {
+        if num <= self.min { -1 }
+        else if num <= self.max + 1 { 0 }
+        else { 1 }
+    }
+
+    // gives the length of the initial walk: MAX for greedy, MIN for lazy
+    pub fn initial_walk_limit(&self) -> usize { if self.lazy {self.min} else { self.max}}
+}
+//
+// These functions parse the reps option from the re source
+//
+
+fn read_int(chars: &mut Peekable) -> Option<usize> {
+    let mut num: usize = 0;
+    let mut any = false;
+    loop {
+        let digit = chars.next();
+        if digit.is_none() { break; }
+        let digit = digit.unwrap();
+        if !('0'..='9').contains(&digit) {
+            chars.put_back(digit);
+            break;
+        }
+        any = true;
+        num = num*10 + (digit as usize) - ('0' as usize);
+    }
+    if any { Some(num) } else { None }
+}
+
+//////////////////////////////////////////////////////////////////
+//
 // parse()
 //
 // This gets its own section because it is the core of the tree parser. It peeks at the
@@ -650,7 +596,7 @@ pub fn parse_tree(input: &str) -> Result<Node, String> {
     chars.push(')');
     let mut outer_and = AndNode::parse_node(&mut chars)?;
     if anchor_front {
-        let and_node = outer_and.and_mut_ref();
+        let and_node = outer_and.mut_and_ref();
         and_node.anchor = true;
     }
     Ok(outer_and)
@@ -660,9 +606,9 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
     let mut start = text;
     // hey, optimization
     // deosn't save that much time but makes the trace debug easier to read
-    let root = tree.and_ref();
+    let root = {if let Node::And(r) = tree { r } else { panic!("Root of tree should be Node::And") }};
     if !root.anchor {
-        if let Some(node_0) = tree.and_ref().nodes[0].chars_ref() {
+        if let Node::Chars(node_0) = &root.nodes[0] {
             if node_0.limits().min > 0 {
                 let copy = node_0.string.to_string();
                 match start.find(&copy) {
@@ -685,7 +631,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Option<walk::Path<'a>> {
             return Some(path);
         }
         if trace(1) {println!("==== WALK \"{}\": no match ====", start)};
-        if tree.and_ref().anchor { break; }
+        if root.anchor { break; }
         start = &start[char_bytes(start, 1)..];
     }
     None

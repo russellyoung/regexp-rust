@@ -97,7 +97,7 @@ fn or_with_chars_bug() {
     let mut or_node = make_or();
     or_node.push(make_chars_string("c"));
     or_node.push(make_chars_string("d"));
-    make_or_limits(or_node.or_mut_ref());
+    make_or_limits(or_node.mut_or_ref());
     node.push(or_node);
     node.push(make_chars_string("ef"));
     assert_eq!(node, parse_tree(r"abc\|def").unwrap());
@@ -178,7 +178,8 @@ fn special_chars() {
     find(r"^abc", "abcdef", "abc");
     not_find(r"^abc", "xabcdef");
     find(r"a^bc", "xa^bcdef", "a^bc");
-    
+    find(r"a\d+\l+", "aba123Ba123bcD", "a123bc");
+    find(r"\a\u+", "你好abCD没有", "bCD");
 }
     
 #[test]
