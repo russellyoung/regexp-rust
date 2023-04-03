@@ -15,7 +15,10 @@ fn make_special(special: char, min: usize, max: usize, lazy: bool) -> Node {
     Node::SpecialChar(SpecialCharNode {special, lims: Limits {min, max, lazy}})
 }
 
-fn make_and(min: usize, max: usize, lazy: bool, report: bool) -> Node {
+fn make_root<'a> (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
+
+fn make_and<'a> (min: usize, max: usize, lazy: bool, name: Option<&'a str>) -> Node {
+    let report = {if let Some(n) = name {Some(n.to_string())} else {None}};
     Node::And(AndNode{nodes: Vec::<Node>::new(), lims: Limits{min, max, lazy}, report, anchor: false})
 }
 fn make_or() -> Node {
@@ -79,14 +82,14 @@ fn limits_test() {
 //
 #[test]
 fn test_string_simple() {
-    let mut node = make_and(1, 1, false, true);
+    let mut node = make_root(1, 1, false);
     node.push(make_chars_string("abcd"));
     assert_eq!(node, parse_tree("abcd").unwrap());
 }
 
 #[test]
 fn test_string_embedded_reps() {
-    let mut node = make_and(1, 1, false, true);
+    let mut node = make_root(1, 1, false);
     node.push(make_chars_string("ab"));
     node.push(make_chars_single("c", 0, 1, false));
     node.push(make_chars_string("de", ));
@@ -98,7 +101,7 @@ fn test_string_embedded_reps() {
               
 #[test]
 fn test_string_embedded_reps_lazy() {
-    let mut node = make_and(1, 1, false, true);
+    let mut node = make_root(1, 1, false);
     node.push(make_chars_string("ab"));
     node.push(make_chars_single("c", 0, 1, true));
     node.push(make_chars_string("de", ));
@@ -111,7 +114,7 @@ fn test_string_embedded_reps_lazy() {
               
 #[test]
 fn test_special_in_string() {
-    let mut node = make_and(1, 1, false, true);
+    let mut node = make_root(1, 1, false);
     node.push(make_chars_string("abc"));
     node.push(make_special('.', 1, 1, false));
     node.push(make_chars_string("def", ));
@@ -125,7 +128,7 @@ fn test_special_in_string() {
     
 #[test]
 fn or_with_chars_bug() {
-    let mut node = make_and(1, 1, false, true);
+    let mut node = make_root(1, 1, false);
     node.push(make_chars_string("ab"));
     let mut or_node = make_or();
     or_node.push(make_chars_string("c"));
@@ -138,7 +141,7 @@ fn or_with_chars_bug() {
 
 #[test]
 fn set_basic() {
-    let mut node = make_and(1, 1, false, true);
+    let mut node = make_root(1, 1, false);
     node.push(make_chars_string("ab"));
     let targets = vec![Set::RegularChars("cde".to_string()),];
     node.push(make_set(false, targets, 0, EFFECTIVELY_INFINITE, false));
@@ -154,8 +157,8 @@ fn set_basic() {
 
 fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
     let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let path = walk_tree(&tree, text).unwrap_or_else(|_| panic!("Expected \"{}\", didn't find anything", expected)).unwrap();
-    let report = path.report().unwrap_or_else(|| panic!("re \"{}\" expected \"{}\", got no match", re, expected));
+    let (path, start, b_start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("Expected \"{}\", didn't find anything", expected)).unwrap();
+    let report = crate::regexp::walk::Report::new(&path, start, b_start);
     assert_eq!(report.found, expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, report.found);
 }       
         

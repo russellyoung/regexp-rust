@@ -7,25 +7,6 @@ fn ref_last<T>(v: &Vec<T>) -> &T { &v[v.len() - 1] }
 
 //////////////////////////////////////////////////////////////////
 //
-// Report
-//
-// Used to deliver the results to the caller, a tree of results
-//
-//////////////////////////////////////////////////////////////////
-pub struct Report<'a> {
-    pub found: &'a str,
-    pub subreports: Vec<Report<'a>>,
-}
-
-impl<'a> Report<'a> {
-    pub fn display(&self, indent: usize) {
-        println!("{}\"{}\"", pad(indent), self.found);
-        self.subreports.iter().for_each(move |r| r.display(indent + 1));
-    }
-}
-
-//////////////////////////////////////////////////////////////////
-//
 // Step structs
 //
 // A path through the tree is a vector of steps, where each step is a
@@ -81,21 +62,6 @@ pub struct OrStep<'a> {
 pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Set(Vec<SetStep<'a>>), And(Vec<AndStep<'a>>), Or(OrStep<'a>), None }
 
 impl<'a> Path<'a> {
-    pub fn report(&self) -> Option<Report> {
-        match self {
-            Path::And(steps) => {
-                if steps[0].node.report {
-                    Some(Report {found: self.matched_string(),
-                                 subreports: ref_last(steps).child_paths.iter()
-                                 .filter_map(|p| p.report())
-                                 .collect()})
-                } else { None }
-            },
-            Path::Or(step) => step.child_path.report(),
-            _ => None
-        }
-    }
-    
     pub fn len(&self) -> usize {
         match self {
             Path::Chars(steps) => steps.len(),
@@ -162,7 +128,7 @@ impl<'a> Path<'a> {
             },
         };
         let ret = limits.check(self.len()) == 0;
-        if trace(1) { println!("{}backoff: {:?}, success: {}", trace_indent(), self, ret)}
+        if trace(3) { println!("{}backoff: {:?}, success: {}", trace_indent(), self, ret)}
         ret
     }
 
@@ -189,9 +155,42 @@ impl<'a> Path<'a> {
         }
     }
 
+    fn gather_reports(&'a self, char_start: usize, byte_start: usize) -> (Vec<Report<'a>>, usize) {
+        let mut char_pos = char_start;
+        let mut byte_pos = byte_start;
+        let mut reports = Vec::<Report>::new();
+        match self {
+            Path::And(steps) => {
+                if steps.len() == 1 {
+                    let (mut subreport, _pos,) = steps[0].make_report(char_pos, byte_pos);
+                    if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
+                    else { reports.push(subreport); }
+                } else {
+                    for step in steps.iter().skip(1) {
+                        let (mut subreport, pos) = step.make_report(char_pos, byte_pos);
+                        char_pos = pos;
+                        byte_pos += step.match_len;
+                        if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
+                        else { reports.push(subreport); }
+                    }
+                }
+            },
+            Path::Or(step) => {
+                let (subreport, pos) = step.make_report(char_start, byte_start);
+                char_pos = pos;
+                if subreport.name.is_none() { reports = subreport.subreports; }
+                else { reports.push(subreport); }
+            },
+            _ => {
+                char_pos += self.matched_string().chars().count();
+            },
+        }
+        (reports, char_pos)
+    }
+    
     fn trace(self, level: u32, prefix: &'a str) -> Path {
         if trace(level) {
-            trace_change_indent(-2);
+            trace_change_indent(-1);
             println!("{}{} {:?}", trace_indent(), prefix, &self);
         }
         self
@@ -269,14 +268,14 @@ impl<'a> CharsStep<'a> {
     pub fn walk(node: &'a CharsNode, string: &'a str) -> Path<'a> {
         let mut steps = Vec::<CharsStep>::new();
         steps.push(CharsStep {node, string, match_len: 0});
-        if trace(1) {
+        if trace(2) {
             println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
-            trace_change_indent(2);
+            trace_change_indent(1);
         }
         for _i in 1..=node.limits().initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
-                    if trace(2) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
+                    if trace(3) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
                     steps.push(s);
                 },
                 None => break,
@@ -294,19 +293,19 @@ impl<'a> CharsStep<'a> {
         }
     }
 }
-
+        
 impl<'a> SpecialStep<'a> {
     pub fn walk(node: &'a SpecialCharNode, string: &'a str) -> Path<'a> {
         let mut steps = Vec::<SpecialStep>::new();
         steps.push(SpecialStep {node, string, match_len: 0});
         if trace(1) {
             println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
-            trace_change_indent(2);
+            trace_change_indent(1);
         }
         for _i in 1..=node.limits().initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
-                    if trace(2) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
+                    if trace(3) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
                     steps.push(s);
                 },
                 None => { break; }
@@ -329,20 +328,20 @@ impl<'a> SetStep<'a> {
     pub fn walk(node: &'a SetNode, string: &'a str) -> Path<'a> {
         let mut steps = Vec::<SetStep>::new();
         steps.push(SetStep {node, string, match_len: 0});
-        if trace(1) {
+        if trace(2) {
             println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
-            trace_change_indent(2);
+            trace_change_indent(1);
         }
         for _i in 1..=node.limits().initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
-                    if trace(2) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
+                    if trace(3) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
                     steps.push(s);
                 },
                 None => { break; }
             }
         }
-        Path::Set(steps).trace(1, "end walk")
+        Path::Set(steps).trace(2, "end walk")
     }
     fn step (&self) -> Option<SetStep<'a>> {
         let string = &self.string[self.match_len..];
@@ -359,32 +358,22 @@ impl<'a> AndStep<'a> {
     pub fn walk(node: &'a AndNode, string: &'a str) -> Path<'a> {
         let mut steps = Vec::<AndStep>::new();
         steps.push(AndStep {node, string, match_len: 0, child_paths: Vec::<Path<'a>>::new()});
-        if trace(1) {
+        if trace(2) {
             println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
-            trace_change_indent(2);
+            trace_change_indent(1);
         }
         for _i in 1..=node.limits().initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
-                    if trace(2) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
+                    if trace(3) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
                     steps.push(s);
                 },
                 None => { break; }
             }
         }
-        Path::And(steps).trace(1, "end walk")
+        Path::And(steps).trace(2, "end walk")
     }
 
-/*
-    fn status(&self) -> String {
-        let mut status = format!("    AND({}) state: [", self.node.nodes.len());
-        for p in self.child_paths.iter() { status.push_str(&format!("{}, ", p.len())); }
-        for _i in self.child_paths.len()..self.node.nodes.len() { status.push_str("-, "); }
-        status.push(format!("]{}", self.limits.simple_display()));
-        status
-    }
-*/
-    //    fn last_path(&self) -> &Path { &self.child_paths[self.child_paths.len() - 1] }
     fn step (&self) -> Option<AndStep<'a>> {
         let string0 = &self.string[self.match_len..];
         let mut step = AndStep {node: self.node,
@@ -401,9 +390,9 @@ impl<'a> AndStep<'a> {
             if child_path.limits().check(child_path.len()) == 0 {
                 step.child_paths.push(child_path);
                 if trace(3) {
-                    trace_change_indent(-2);
+                    trace_change_indent(-1);
                     println!("{}new step: {:?}", trace_indent(), step);
-                    trace_change_indent(2);
+                    trace_change_indent(1);
                 }
             } else if !step.back_off() {
                 return None;
@@ -423,29 +412,48 @@ impl<'a> AndStep<'a> {
         }
         !self.child_paths.is_empty()
     }
+
+    fn make_report(&self, char_start: usize, byte_start: usize) -> (Report, usize) {
+        let mut reports = Vec::<Report>::new();
+        let mut char_end = char_start;
+        let mut byte_end = byte_start;
+        for p in &self.child_paths {
+            let (mut subreports, loc) = p.gather_reports(char_end, byte_end);
+            char_end = loc;
+            byte_end += p.match_len();
+            reports.append(&mut subreports);
+        }
+        (Report {found: &self.string[0..self.match_len],
+                 name: self.node.report.clone(),
+                 pos: (char_start, char_end),
+                 bytes: (byte_start, byte_start + self.match_len),
+                 subreports: reports},
+         char_end)
+    }
 }
                     
     // OR is a little different: no repeat count, so its step() is not needed
 impl<'a> OrStep<'a> {
     pub fn walk(node: &'a OrNode, string: &'a str) -> Path<'a> {
-        if trace(1) {
+        if trace(2) {
             let fake = OrStep {node, string, which: 0, child_path: Box::new(Path::None), match_len: 0};
             println!("{}Starting walk for {:?}", trace_indent(), fake);
-            trace_change_indent(2);
+            trace_change_indent(1);
         }
         for which in 0..node.nodes.len() {
             let child_path = node.nodes[which].walk(string);
             if child_path.limits().check(child_path.len()) == 0 {
                 let match_len = child_path.match_len();
-                return Path::Or(OrStep {node, string, which, child_path: Box::new(child_path), match_len}).trace(1, "end walk0");
+                return Path::Or(OrStep {node, string, which, child_path: Box::new(child_path), match_len}).trace(2, "end walk0");
             }
         }
-        Path::Or(OrStep {node, string, which: node.nodes.len(), child_path: Box::new(Path::None), match_len: 0}).trace(1, "end walk1")
+        Path::Or(OrStep {node, string, which: node.nodes.len(), child_path: Box::new(Path::None), match_len: 0}).trace(2, "end walk1")
     }
-//    fn status(&self) -> String {
-//        format!("    OR({}) which: {} reps: {}", self.node.nodes.len(), self.which, self.child_path.len())
-//    }
 
+    fn make_report(&self, char_start: usize, byte_start: usize) -> (Report, usize) {
+        let (subreports, char_end) = self.child_path.gather_reports(char_start, byte_start);
+        (Report {found: self.string, name: None, pos: (char_start, char_end), bytes: (byte_start, byte_start + self.match_len), subreports}, char_end)
+    }
 }
 
 // helper function to keep strings from being too long.
@@ -456,3 +464,48 @@ fn abbrev(string: &str) -> String {
     let dots = if s.len() == string.len() {""} else {"..."};
     format!("\"{}\"{}", s, dots)
 }
+
+//////////////////////////////////////////////////////////////////
+//
+// Report
+//
+// Used to deliver the results to the caller, a tree of results
+//
+//////////////////////////////////////////////////////////////////
+
+#[derive(Debug,Clone)]
+pub struct Report<'a> {
+    pub found: &'a str,
+    pos: (usize, usize),
+    bytes: (usize, usize),
+    name: Option<String>,
+    pub subreports: Vec<Report<'a>>,
+}
+
+impl<'a> Report<'a> {
+    pub fn new<'b>(root: &'b Path, char_start: usize, byte_start: usize) -> Report<'b> {
+        let (reports, _char_end)  = root.gather_reports(char_start, byte_start);
+        reports[0].clone()
+    }
+    
+    pub fn display(&self, indent: isize) {
+        println!("{}\"{}\" char position [{}, {}] byte position [{}, {}] {}",
+                 pad(indent), self.found, self.pos.0, self.pos.1, self.bytes.0, self.bytes.1, if let Some(name) = &self.name {&name} else {""});
+        self.subreports.iter().for_each(move |r| r.display(indent + 1));
+    }
+
+    pub fn named<'b>(&self, name: &'b str) -> Vec<(&'a str, (usize, usize))> {
+        let mut v = Vec::<(&'a str, (usize, usize))>::new();
+        if let Some(n) = &self.name {
+            if n == name {
+                v.push((self.found, self.pos));
+            }
+        }
+        for r in &self.subreports {
+            let mut x = r.named(name);
+            v.append(&mut x);
+        }
+        v
+    }
+}
+

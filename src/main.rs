@@ -3,7 +3,11 @@ mod regexp;
 
 //use crate::regexp;
 //use std::env;
+use crate::regexp::Node;
+
 use clap::{Parser, value_parser};               // Command Line Argument Processing
+use std::io;
+use std::io::prelude::*;
 
 // interactive mode (TODO)
 const INTERACTIVE_DEFAULT: bool = false;
@@ -13,7 +17,7 @@ const PRINTTREE_DEFAULT: bool = false;
 const DEBUG_DEFAULT: u32 = 0;
 const ABBREV_DEFAULT: u32 = 5;
 
-const TAB_SIZE:usize = 2;                     // indent in Debug display
+const TAB_SIZE:isize = 4;                     // indent in Debug display
 
 // Used for debugging: the function trace(Path) either is a no-op or prints the given path, depending on the command line args
 //static mut trace = |x| { println!("{:#?}", x) };
@@ -24,19 +28,20 @@ pub fn trace(level: u32) -> bool { unsafe { level <= TRACE_LEVEL }}
 
 static mut TRACE_INDENT:isize = 0;
 // when assigning trace levels to print statements make sure lines that change the indent level have the same trace level
-pub fn trace_change_indent(delta: isize) { unsafe {TRACE_INDENT += delta; }}
-pub fn trace_indent() -> String { unsafe { pad(TRACE_INDENT as usize) }}
+pub fn trace_change_indent(delta: isize) { unsafe { TRACE_INDENT += delta; } }
+pub fn trace_set_indent(size: isize) { unsafe { TRACE_INDENT = size; } }
+pub fn trace_indent() -> String { unsafe { pad(TRACE_INDENT) }}
 
 // helper function to format debug
-fn pad(x: usize) -> String {
-    let pad = TAB_SIZE*x;
+fn pad(x: isize) -> String {
+    let pad = { if x < 0 {0} else {(TAB_SIZE*x) as usize}};
     format!("{:pad$}", "")
 }
 
 /// rer (regular Expressions Rust): sample Rust program to search strings using regular expressions
 /// similar to (but not identical to) elisp regular expressions (which is also similar to perl
 /// regular expressions).
-/// 	
+/// 
 /// The search has two phases, in the first phase it parses the regexp to get a regexp tree, and in the
 /// second it walks the tree trying to find a path covering all the nodes.
 ///
@@ -67,10 +72,10 @@ fn pad(x: usize) -> String {
 #[derive(Parser, Debug)]
 #[command(author, version, about, verbatim_doc_comment)]
 pub struct Config {
-    /// Regular expression to search for (required)
-    #[clap()]
+    /// Regular expression to search for (required unless --interactive)
+    #[clap(default_value_t = String::from(""))]
     pub re: String,
-    /// String to search (required, unless --tree is used)
+    /// String to search (required, unless --tree or --interactive)
     #[clap(default_value_t = String::from(""))]
     pub text: String,
     /// Start up an interactive session (TODO)
@@ -90,9 +95,11 @@ pub struct Config {
 impl Config {
     fn get() -> Result<Config, &'static str> {
         let config = Config::parse();
-        // custom checks go here
-        if config.text.is_empty() && !config.tree {
-            Err("Either -t (show parse tree) or TEXT is required")
+        if config.interactive { Ok(config) }
+        else if config.re.is_empty() {
+            Err("RE is required unless --interactive given")
+        } else if config.text.is_empty() {
+            Err("TEXT is required unless --interactive or --tree given")
         } else {Ok(config)}
     }
 }
@@ -105,6 +112,9 @@ fn main() {
             return;
         }
     };
+    if config.interactive {
+        return Interactive::new(config).run();
+    }
     set_trace(config.debug);
     crate::regexp::walk::set_abbrev_size(config.abbrev);
     // execution starts
@@ -119,11 +129,57 @@ fn main() {
         println!("--- Parse tree:\n{:?}", tree);
     }
     if !config.text.is_empty() {
-        let result = regexp::walk_tree(&tree, &config.text);
-        match result {
-            Ok(Some(path)) => { if let Some(report) = path.report() { report.display(0); } else {println!("{}", path.matched_string());} },
+        match regexp::walk_tree(&tree, &config.text) {
+            Ok(Some((path, char_start, bytes_start))) => crate::regexp::walk::Report::new(&path, char_start, bytes_start).display(0),
             Ok(None) => println!("No match"),
             Err(error) => println!("{}", error)
         }
+    }
+}
+
+const PROMPT: &str = "> ";
+
+struct Interactive {
+    res: Vec<String>,
+    texts: Vec<String>,
+    tree: Node,
+    
+    prompt_str: String,
+    abbrev: u32,
+}
+
+impl Interactive {
+    fn new(config: Config) -> Interactive {
+        let mut res = Vec::<String>::new();
+        if !config.re.is_empty() { res.push(config.re.to_string()); }
+        let mut texts = Vec::<String>::new();
+        if !config.text.is_empty() { res.push(config.text.to_string()); }
+//        r"^ *\([rt][a-z]*\)
+        Interactive { res,
+                      texts,
+                      tree: Node::None,
+                      prompt_str: PROMPT.to_string(),
+                      abbrev: config.abbrev,
+        }
+    }
+
+    fn run(&mut self) {
+        let stdin = io::stdin();
+        self.prompt();
+        for line in stdin.lock().lines() {
+            self.do_command(line.unwrap());
+            self.prompt();
+        }
+        println!("exit");
+    }
+
+    fn prompt(&mut self) {
+        if self.res.is_empty() { print!("(RE) {} ", self.prompt_str); }
+        else if self.texts.is_empty() { print!("(TEXT) {} ", self.prompt_str); }
+        else { print!("{} ", self.prompt_str); }
+        std::io::stdout().flush().unwrap();
+    }
+    fn do_command(&mut self, command: String) {
+
     }
 }
