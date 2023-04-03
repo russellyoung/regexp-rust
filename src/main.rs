@@ -3,11 +3,12 @@ mod regexp;
 
 //use crate::regexp;
 //use std::env;
-use crate::regexp::Node;
+use crate::regexp::{Report, Node};
 
 use clap::{Parser, value_parser};               // Command Line Argument Processing
 use std::io;
 use std::io::prelude::*;
+use std::collections::HashMap;
 
 // interactive mode (TODO)
 const INTERACTIVE_DEFAULT: bool = false;
@@ -98,7 +99,7 @@ impl Config {
         if config.interactive { Ok(config) }
         else if config.re.is_empty() {
             Err("RE is required unless --interactive given")
-        } else if config.text.is_empty() {
+        } else if config.text.is_empty() && !config.tree {
             Err("TEXT is required unless --interactive or --tree given")
         } else {Ok(config)}
     }
@@ -130,7 +131,7 @@ fn main() {
     }
     if !config.text.is_empty() {
         match regexp::walk_tree(&tree, &config.text) {
-            Ok(Some((path, char_start, bytes_start))) => crate::regexp::walk::Report::new(&path, char_start, bytes_start).display(0),
+            Ok(Some((path, char_start, bytes_start))) => Report::new(&path, char_start, bytes_start).display(0),
             Ok(None) => println!("No match"),
             Err(error) => println!("{}", error)
         }
@@ -143,43 +144,167 @@ struct Interactive {
     res: Vec<String>,
     texts: Vec<String>,
     tree: Node,
-    
+    cmd_parse_tree: Node,
     prompt_str: String,
     abbrev: u32,
 }
+
+//const CMD_PARSE_RE:&str = r"^ *\(?<cmd>[rth?][a-z]*\) *\(?<body>\(?<subcmd>[a-z]+\|[0-9]*\) *\(?<tail>.*\)\)?";
+const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rth?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)[^0-9]\|$ *\(?<tail>.*\)\)?\)";
+
+fn get_var<'a>(vars: &HashMap<&'a str, Vec<(&'a String, (usize, usize), (usize, usize))>>, name: &'a str) -> &'a str {
+    if let Some(var) = vars.get(name) { var[0].0.as_str() } else { "" }
+}
+fn looks_like_re(string: &str) -> bool { string.contains('\\') || string.contains('*') || string.contains('+')}
 
 impl Interactive {
     fn new(config: Config) -> Interactive {
         let mut res = Vec::<String>::new();
         if !config.re.is_empty() { res.push(config.re.to_string()); }
         let mut texts = Vec::<String>::new();
-        if !config.text.is_empty() { res.push(config.text.to_string()); }
-//        r"^ *\([rt][a-z]*\)
+        if !config.text.is_empty() { texts.push(config.text.to_string()); }
         Interactive { res,
                       texts,
                       tree: Node::None,
+                      cmd_parse_tree: regexp::parse_tree(&CMD_PARSE_RE).unwrap(),
                       prompt_str: PROMPT.to_string(),
                       abbrev: config.abbrev,
         }
     }
-
-    fn run(&mut self) {
-        let stdin = io::stdin();
-        self.prompt();
-        for line in stdin.lock().lines() {
-            self.do_command(line.unwrap());
-            self.prompt();
-        }
-        println!("exit");
-    }
-
+    
     fn prompt(&mut self) {
         if self.res.is_empty() { print!("(RE) {} ", self.prompt_str); }
         else if self.texts.is_empty() { print!("(TEXT) {} ", self.prompt_str); }
         else { print!("{} ", self.prompt_str); }
         std::io::stdout().flush().unwrap();
     }
-    fn do_command(&mut self, command: String) {
 
+    fn run(&mut self) {
+        let stdin = io::stdin();
+        let mut buffer;
+        loop {
+            self.prompt();
+            buffer = "".to_string();
+            match stdin.read_line(&mut buffer) {
+                Ok(0) => { break; },
+                Ok(1) => (),
+                Ok(_x) => { let  _ = buffer.pop(); self.do_command(&buffer);},
+                Err(_msg) => { break;},
+            }
+        }
+        println!("exit");
     }
+    
+    fn do_command(&mut self, input: &String) {
+        let walk = regexp::walk_tree(&self.cmd_parse_tree, &input);
+        if let Ok(Some((path, _, _))) = &walk {
+            let report = Report::new(&path, 0, 0);
+            let vars = report.get_named();
+            //            let (cmd, subcmd, body, tail) = (vars.get("cmd").unwrap()[0].0,
+//                                             vars.get("subcmd").unwrap()[0].0,
+//                                             vars.get("body").unwrap()[0].0,
+//                                             vars.get("tail").unwrap()[0].0);
+//            println!("'{}', '{}', '{}', '{}'", cmd, subcmd, body, tail);
+            self.execute_command(get_var(&vars, "cmd"),      // first word
+                                 get_var(&vars, "subcmd"),   // second word if it is alphabetic
+                                 get_var(&vars, "num"),      // second word if it is numeric
+                                 get_var(&vars, "tail"),     // stuff after second word
+                                 get_var(&vars, "body"),   // everything after the first word
+                                 get_var(&vars, "all"),);    // everything
+        } else {
+            self.execute_command("", "", "", "", "", input);
+        }
+    }
+
+    fn execute_command(&mut self, cmd: &str, subcmd: &str, num: &str, tail: &str, body: &str, all: &str) {
+        println!("cmd: '{}', subcmd: '{}', num: '{}', tail: '{}', body: '{}', all: '{}'", cmd, subcmd, num, tail, body, all);
+        if cmd.is_empty() {
+            if looks_like_re(all) {
+                println!("guessing \"{}\" is a RE", all);
+                self.res.push(all.to_string());
+            }
+            else { println!("Unrecognized command"); }
+        }
+        else if "re".starts_with(cmd) {
+            if !num.is_empty() {
+                if let Ok(num) = num.parse::<usize>() {
+                    if num >= self.res.len() { println!("Number too large, no such RE"); }
+                    else if num < self.res.len() { 
+                        let re = self.res.remove(self.res.len() - 1 - num);
+                        println!("Using RE \"{}\"", re);
+                        self.res.push(re);
+                    } else {}
+                }
+            } else if !subcmd.is_empty() {
+                if "pop".starts_with(subcmd) {
+                    let _ = self.res.pop();
+                    if self.res.is_empty() { println!("No current RE"); }
+                    else { println!("current RE is \"{}\"", self.res[self.res.len() - 1]); }
+                } else if "history".starts_with(subcmd) {
+                    let len = self.res.len();
+                    if len == 0 { println!("No saved REs"); }
+                    else { for i in 0..len { println!("  {}: \"{}\"", i, self.res[len - i - 1]); } }
+                } else if "set".starts_with(subcmd) { self.res.push(tail.to_string()); }
+                else if looks_like_re(body) {
+                    println!("guessing \"{}\" is a RE", body);
+                    self.res.push(body.to_string());
+                } else { println!("Unrecognized subcommand"); }
+            } else if looks_like_re(body) {
+                println!("guessing \"{}\" is a RE", body);
+                self.res.push(body.to_string());
+            } else if body.is_empty() {
+                if self.res.is_empty() { println!("No current RE"); }
+                else { println!("current RE is \"{}\"", self.res[self.res.len() - 1]); }
+            } else { println!("Unrecognized subcommand"); }
+        } else if "text".starts_with(cmd) {
+            if !num.is_empty() {
+                if let Ok(num) = num.parse::<usize>() {
+                    if num >= self.texts.len() { println!("Number too large, no such text"); }
+                    else if num < self.texts.len() { 
+                        let text = self.texts.remove(self.texts.len() - 1 - num);
+                        println!("Using text \"{}\"", text);
+                        self.texts.push(text.to_string());
+                    } else {}
+                }
+            } else if !subcmd.is_empty() {
+                if "pop".starts_with(subcmd) {
+                    let _ = self.texts.pop();
+                    if self.texts.is_empty() { println!("No current RE"); }
+                    else { println!("current RE is \"{}\"", self.texts[self.texts.len() - 1]); }
+                } else if "set".starts_with(subcmd) { self.texts.push(tail.to_string()); }
+                else if "history".starts_with(subcmd) {
+                    let len = self.texts.len();
+                    if len == 0 { println!("No saved texts"); }
+                    else { for i in 0..len { println!("  {}: \"{}\"", i, self.texts[len - i - 1]); } }
+                } else if !body.is_empty() { self.texts.push(body.to_string()); }
+                else if self.texts.is_empty() { println!("No texts saved"); }
+                else { println!("current text is \"{}\"", self.texts[self.texts.len() - 1]); }
+            }
+        } else if "help".starts_with(cmd) {
+            println!("help text");
+        }
+    }
+}
+
+fn yorn(prompt: &str, dflt: Option<bool>) -> bool {
+    let p = match dflt {
+        None => "y[es] or n[o]",
+        Some(true) => "[yes] or n[o]",
+        Some(false) => "y[es] or [no]",
+    };
+    let stdin = io::stdin();
+    let mut buffer = String::new();
+    loop {
+        print!("{} ({}): ", prompt, p);
+        std::io::stdout().flush().unwrap();
+        if let Ok(count) = stdin.read_line(&mut buffer) {
+            if count < 2 { break; }
+            let _ = buffer.pop();
+            println!("{:#?}", buffer);
+            if "yes".starts_with(&buffer) { return true; }
+            if "no".starts_with(&buffer) { return false; }
+            println!("???{:#?}", buffer);
+        } else { println!("error reading input"); }
+    }
+    if let Some(d) = dflt { d } else {yorn(prompt, dflt)}
 }

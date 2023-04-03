@@ -155,7 +155,7 @@ impl<'a> Path<'a> {
         }
     }
 
-    fn gather_reports(&'a self, char_start: usize, byte_start: usize) -> (Vec<Report<'a>>, usize) {
+    pub fn gather_reports(&'a self, char_start: usize, byte_start: usize) -> (Vec<Report>, usize) {
         let mut char_pos = char_start;
         let mut byte_pos = byte_start;
         let mut reports = Vec::<Report>::new();
@@ -222,7 +222,8 @@ impl<'a> Debug for AndStep<'a> {
         let mut child_counts: String = "".to_string();
         for p in self.child_paths.iter() { child_counts.push_str(&format!("{}, ", p.len())); }
         for _i in self.child_paths.len()..self.node.nodes.len() { child_counts.push_str("-, "); }
-        write!(f, "AND({}){} state [{}], string {}", self.node.nodes.len(), self.node.limits().simple_display(), child_counts, abbrev(self.string))
+        let name = { if let Some(name) = &self.node.report { format!("<{}>", name) } else { "".to_string()} };
+        write!(f, "AND{}({}){} state [{}], string {}", name, self.node.nodes.len(), self.node.limits().simple_display(), child_counts, abbrev(self.string))
     }
 }
 impl<'a> Debug for OrStep<'a> {
@@ -423,7 +424,7 @@ impl<'a> AndStep<'a> {
             byte_end += p.match_len();
             reports.append(&mut subreports);
         }
-        (Report {found: &self.string[0..self.match_len],
+        (Report {found: self.string[0..self.match_len].to_string(),
                  name: self.node.report.clone(),
                  pos: (char_start, char_end),
                  bytes: (byte_start, byte_start + self.match_len),
@@ -452,7 +453,7 @@ impl<'a> OrStep<'a> {
 
     fn make_report(&self, char_start: usize, byte_start: usize) -> (Report, usize) {
         let (subreports, char_end) = self.child_path.gather_reports(char_start, byte_start);
-        (Report {found: self.string, name: None, pos: (char_start, char_end), bytes: (byte_start, byte_start + self.match_len), subreports}, char_end)
+        (Report {found: self.string.to_string(), name: None, pos: (char_start, char_end), bytes: (byte_start, byte_start + self.match_len), subreports}, char_end)
     }
 }
 
@@ -465,47 +466,4 @@ fn abbrev(string: &str) -> String {
     format!("\"{}\"{}", s, dots)
 }
 
-//////////////////////////////////////////////////////////////////
-//
-// Report
-//
-// Used to deliver the results to the caller, a tree of results
-//
-//////////////////////////////////////////////////////////////////
-
-#[derive(Debug,Clone)]
-pub struct Report<'a> {
-    pub found: &'a str,
-    pos: (usize, usize),
-    bytes: (usize, usize),
-    name: Option<String>,
-    pub subreports: Vec<Report<'a>>,
-}
-
-impl<'a> Report<'a> {
-    pub fn new<'b>(root: &'b Path, char_start: usize, byte_start: usize) -> Report<'b> {
-        let (reports, _char_end)  = root.gather_reports(char_start, byte_start);
-        reports[0].clone()
-    }
-    
-    pub fn display(&self, indent: isize) {
-        println!("{}\"{}\" char position [{}, {}] byte position [{}, {}] {}",
-                 pad(indent), self.found, self.pos.0, self.pos.1, self.bytes.0, self.bytes.1, if let Some(name) = &self.name {&name} else {""});
-        self.subreports.iter().for_each(move |r| r.display(indent + 1));
-    }
-
-    pub fn named<'b>(&self, name: &'b str) -> Vec<(&'a str, (usize, usize))> {
-        let mut v = Vec::<(&'a str, (usize, usize))>::new();
-        if let Some(n) = &self.name {
-            if n == name {
-                v.push((self.found, self.pos));
-            }
-        }
-        for r in &self.subreports {
-            let mut x = r.named(name);
-            v.append(&mut x);
-        }
-        v
-    }
-}
 

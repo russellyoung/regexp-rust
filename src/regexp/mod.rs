@@ -10,6 +10,7 @@ mod tests;
 use std::str::Chars;
 use crate::{pad, trace, trace_indent, trace_change_indent, trace_set_indent};
 use core::fmt::{Debug,};
+use std::collections::HashMap;
 
 const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
 const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
@@ -278,7 +279,7 @@ impl TreeNode for SetNode {
 impl CharsNode {
     // These characters have meaning when escaped, break for them. Otherwise just delete the '/' from the string
     // TODO: get the right codes
-    const ESCAPE_CODES: &str = "dula()|";
+    const ESCAPE_CODES: &str = "ntdula()|";
 
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { entering("CHARS", chars); }
@@ -290,7 +291,6 @@ impl CharsNode {
                     if '$' == ch0 && chars.peek_n(4)[3].is_none() { break; }
                     if r".[".contains(ch0) { break; }
                     if ch0 == '\\' {
-                        if "()|".contains(ch1) { break; }
                         if CharsNode::ESCAPE_CODES.contains(ch1) { break; }
                         let _ = chars.next();    // pop off the '/'
                     } else if "?*+{".contains(ch0) {  // it is a rep count - this cannot apply to a whole string, just a single character
@@ -339,6 +339,8 @@ impl SpecialCharNode {
             'l' => ('a'..='z').contains(&ch),   // lc ascii
             'u' => ('A'..='Z').contains(&ch),   // uc ascii
             'a' => (' '..='~').contains(&ch),   // ascii printable
+            'n' => ch == '\n',                  // newline
+            't' => ch == '\t',                  // tab
             _ => false
         }
     }
@@ -805,5 +807,72 @@ impl core::fmt::Display for Error {
     // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "Error:{}: {}", self.code, self.msg)
+    }
+}
+
+//////////////////////////////////////////////////////////////////
+//
+// Report
+//
+// Used to deliver the results to the caller, a tree of results
+//
+//////////////////////////////////////////////////////////////////
+
+#[derive(Debug,Clone)]
+pub struct Report {
+    pub found: String,
+    pos: (usize, usize),
+    bytes: (usize, usize),
+    name: Option<String>,
+    pub subreports: Vec<Report>,
+}
+
+impl Report {
+    pub fn new<'b>(root: &'b crate::regexp::walk::Path, char_start: usize, byte_start: usize) -> Report {
+        let (reports, _char_end)  = root.gather_reports(char_start, byte_start);
+        reports[0].clone()
+    }
+    
+    pub fn display(&self, indent: isize) {
+        let name_str = { if let Some(name) = &self.name { format!("<{}>", name) } else { "".to_string() }};
+        println!("{}\"{}\" char position [{}, {}] byte position [{}, {}] {}",
+                 pad(indent), self.found, self.pos.0, self.pos.1, self.bytes.0, self.bytes.1, name_str);
+        self.subreports.iter().for_each(move |r| r.display(indent + 1));
+    }
+
+    pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<(&'b String, (usize, usize), (usize, usize))> {
+        let mut v = Vec::<(&'b String, (usize, usize), (usize, usize))>::new();
+        if let Some(n) = &self.name {
+            if n == name {
+                v.push((&self.found, self.pos, self.bytes));
+            }
+        }
+        for r in &self.subreports {
+            let mut x = r.get_by_name(name);
+            v.append(&mut x);
+        }
+        v
+    }
+
+    pub fn get_named<'b>(&'b self) -> HashMap<&'b str, Vec<(&'b String, (usize, usize), (usize, usize))>> {
+//        let mut hash = HashMap::<&String, Vec<(&'b String, (usize, usize), (usize, usize))>>::new();
+        let hash = HashMap::new();
+        self.get_named_internal(hash)
+    }
+    
+    fn get_named_internal<'b>(&'b self, mut hash: HashMap<&'b str, Vec<(&'b String, (usize, usize), (usize, usize))>>)
+                              -> HashMap<&'b str, Vec<(&'b String, (usize, usize), (usize, usize))>> {
+        if let Some(name) = &self.name {
+            if let Some(mut_v) = hash.get_mut(&name.as_str()) { mut_v.push((&self.found, self.pos, self.bytes)); }
+            else {
+                let mut v = Vec::<(&'b String, (usize, usize), (usize, usize))>::new();
+                v.push((&self.found, self.pos, self.bytes));
+                hash.insert(&name.as_str(), v);
+            }
+            for r in self.subreports.iter() {
+                hash = r.get_named_internal(hash);
+            }
+        }
+        hash
     }
 }
