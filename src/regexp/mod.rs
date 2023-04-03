@@ -235,7 +235,7 @@ impl TreeNode for SpecialCharNode {
 // format the limis for debugging
 impl TreeNode for AndNode {
     fn desc(&self, indent: isize) -> String {
-        let name = { if let Some(name) = &self.report { format!("collect {}", name)} else {"".to_string()}};
+        let name = { if let Some(name) = &self.report { format!("<{}>", name)} else {"".to_string()}};
         let mut msg = format!("{}AndNode({}) {} {}", pad(indent), self.nodes.len(), self.limits().simple_display(), name);
         for i in 0..self.nodes.len() {
             let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
