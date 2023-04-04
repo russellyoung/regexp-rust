@@ -2,32 +2,15 @@
 //! This module provides an interactive application that allows a user to enter several regular expression and text strings,
 //! and then perform searches. It can be useful when trying to write a complicated regular expression to try it out as you go.
 //! 
-//! In addition, it provides features to dump out the regular expression tree and trace the walk phase as it looks for a match
+//! In addition, it provides features to dump out the regular expression tree and trace the walk phase as it looks for a match.
+//! It can be run by adding the **-i** switch to the program when starting it. 
 //! 
+//! The interactive program holds multiple expressions and text strings, and can operate on the top-level one of each. Operations
+//! include performing a search, printing out a search tree, printing out **Path**s as they are being walked. To get complete
+//! directions on how to use it use the command 'help' or '?' after starting it up.
 //! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-//! 
-
+//! While this can help in writing complex regular expressions or in understanding how the parser and walker work, it was mainly 
+//! as an exercise in Rust.
 
 use crate::regexp::*;
 use crate::set_trace;
@@ -38,16 +21,30 @@ use std::collections::HashMap;
 
 const PROMPT: &str = "> ";
 
+/// THe structure used to run an interactive session
 pub struct Interactive {
+    /// the list of regular expressions, last one is the current value
     res: Vec<String>,
+    /// the list of target strings, last one is the current value
     texts: Vec<String>,
-    tree: Node,
+//    tree: Node,
+    /// the tree used to parse the user commands, parsed from CMD_PARSE_RE, to save it from having to be reparsed every time
     cmd_parse_tree: Node,
+    /// the prompt string to use: can be reset (originally it was to reflect the state, now it is constant and this can be removed)
     prompt_str: String,
-    abbrev: u32,
 }
 
+/// a RE used to parse the command line each time it is entered. It gets named matches:
+///  - cmd: the first word
+///  - subcmd: the second word, if alphabetic
+///  - num: the second word, if numeric
+///  - body: everything after the first word
+///  - tail:  everything after the secondword
+///  - all: the whole command, trimmed
+
 const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtsfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)[^0-9]\|$ *\(?<tail>.*\)\)?\)";
+
+/// helptext to display
 const HELP_TEXT: &str = r"
 This is an interactive interface to the regexp search engine. The program keeps stacks of
 regular expressions and search texts and uses them to run searches. Besides simple searching
@@ -78,11 +75,14 @@ The commands are:
  - help:         displays this help
  - ?:            displays this help
 ";
+
+/// gets the matching string for a single named variable from the search results. This is used to parse the used input
 fn get_var<'a>(vars: &HashMap<&'a str, Vec<&'a Report>>, name: &'a str) -> &'a str {
     if let Some(var) = vars.get(name) { var[0].found.as_str() } else { "" }
 }
 
 impl Interactive {
+    /// constructor for the session object
     pub fn new(config: Config) -> Interactive {
         let mut res = Vec::<String>::new();
         if !config.re.is_empty() { res.push(config.re.to_string()); }
@@ -90,16 +90,18 @@ impl Interactive {
         if !config.text.is_empty() { texts.push(config.text.to_string()); }
         Interactive { res,
                       texts,
-                      tree: Node::None,
+//                      tree: Node::None,
                       cmd_parse_tree: parse_tree(CMD_PARSE_RE).unwrap(),
                       prompt_str: PROMPT.to_string(),
-                      abbrev: config.abbrev,
         }
     }
 
+    /// gets the current RE, or None
     fn re(&self) -> Option<&str> { if self.res.is_empty() { None } else { Some(self.res[self.res.len() - 1].as_str()) }}
+    /// gets the current search text, or None
     fn text(&self) -> Option<&str> { if self.texts.is_empty() { None } else { Some(self.texts[self.texts.len() - 1].as_str()) }}
-    
+
+    /// starts up the interactive session
     pub fn run(&mut self) {
         let stdin = io::stdin();
         let mut buffer;
@@ -119,6 +121,7 @@ impl Interactive {
         println!("exit");
     }
 
+    /// tries guessing if a string could be a RE, if it is not sure it asks with **yorn()** (*yes-or-no()*)
     fn guess_re(&mut self, maybe_re: &str) -> bool {
         if (maybe_re.contains('\\') || maybe_re.contains('*') || maybe_re.contains('+'))
             && yorn(&format!("\"{}\" looks like a RE. Is it?", maybe_re), Some(true)) {
@@ -127,22 +130,19 @@ impl Interactive {
             }
         else { false }
     }
-    
+
+    /// prints out the session prompt
     fn prompt(&mut self) {
         print!("{} ", self.prompt_str);
         std::io::stdout().flush().unwrap();
     }
 
+    /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
     fn do_command(&mut self, input: &str) -> bool{
         let walk = walk_tree(&self.cmd_parse_tree, input);
         if let Ok(Some((path, _, _))) = &walk {
             let report = Report::new(path, 0, 0);
             let vars = report.get_named();
-            //            let (cmd, subcmd, body, tail) = (vars.get("cmd").unwrap()[0].0,
-            //                                             vars.get("subcmd").unwrap()[0].0,
-            //                                             vars.get("body").unwrap()[0].0,
-            //                                             vars.get("tail").unwrap()[0].0);
-            //            println!("'{}', '{}', '{}', '{}'", cmd, subcmd, body, tail);
             self.execute_command(get_var(&vars, "cmd"),      // first word
                                  get_var(&vars, "subcmd"),   // second word if it is alphabetic
                                  get_var(&vars, "num"),      // second word if it is numeric
@@ -153,7 +153,8 @@ impl Interactive {
             self.execute_command("", "", "", "", "", input)
         }
     }
-    
+
+    /// execute the user commands
     fn execute_command(&mut self, cmd: &str, subcmd: &str, num: &str, tail: &str, body: &str, all: &str) -> bool{
         //println!("cmd: '{}', subcmd: '{}', num: '{}', tail: '{}', body: '{}', all: '{}'", cmd, subcmd, num, tail, body, all);
         if cmd.is_empty() {
@@ -210,7 +211,8 @@ impl Interactive {
         else if "quit".starts_with(cmd) || ("exit".starts_with(cmd) && yorn("Really exit?", Some(true))) { return false; }
         true
     }
-    
+
+    /// execute a *re* command
     fn do_re(&mut self, subcmd: &str, num: &str, tail: &str, body: &str, ) {
         if !num.is_empty() {
             if let Ok(num) = num.parse::<usize>() {
@@ -240,6 +242,7 @@ impl Interactive {
         }
     }
 
+    /// execute a *text* command
     fn do_text(&mut self, subcmd: &str, num: &str, tail: &str, body: &str) {
         if !num.is_empty() {
             if let Ok(num) = num.parse::<usize>() {
@@ -270,6 +273,7 @@ impl Interactive {
     }
 }
 
+/// get an answer to a yes-or-no question (it's an emacs thing)
 fn yorn(prompt: &str, dflt: Option<bool>) -> bool {
     let p = match dflt {
         None => "y[es] or n[o]",

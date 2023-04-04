@@ -1,8 +1,12 @@
-
+//! ## Regular expression search: Tree walker
+//! This module contains the code for walking the tree to find a RE match. Each match of a **Node** (representing a unit in the
+//! RE tree) is represented by a **Step** object. The **Step**s are grouped in vectors to form **Path**s, each of which represents
+//! a walk through the tree. When a **Path** reaches the end of the tree successfully it means the search has succeeded and that
+//! **Path* is returned, representing a matched string, so it can generate a **Report** giving its route.
 use super::*;
 use crate::{trace, trace_indent, trace_change_indent};
 
-// simplifies code a little
+/// simplifies code a little by removing the awkward accessing of the last element in a vector
 fn ref_last<T>(v: &Vec<T>) -> &T { &v[v.len() - 1] }
 
 //////////////////////////////////////////////////////////////////
@@ -14,37 +18,56 @@ fn ref_last<T>(v: &Vec<T>) -> &T { &v[v.len() - 1] }
 // trtee and to build the Report structure for the caller.
 //
 //////////////////////////////////////////////////////////////////
+/// Represents a single step for a CharsNode
 pub struct CharsStep<'a> {
+    /// The node from phase 1
     node: &'a CharsNode,
+    /// the String where this match starts
     string: &'a str,
-    // Important: match_len is in bytes, not characters
+    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
     match_len: usize,
 }
 
 pub struct SpecialStep<'a> {
+    /// The node from phase 1
     node: &'a SpecialCharNode,
+    /// the String where this match starts
     string: &'a str,
+    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
     match_len: usize,
 }
 
 pub struct SetStep<'a> {
+    /// The node from phase 1
     node: &'a SetNode,
+    /// the String where this match starts
     string: &'a str,
+    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
     match_len: usize,
 }
 
 pub struct AndStep<'a> {
+    /// The node from phase 1
     node: &'a AndNode,
+    /// the String where this match starts
     string: &'a str,
+    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
     match_len: usize,
+    /// A vector of Paths saving the current state of this And node. Each entry is a **Path** based on the **nodes** member of the **AndNode** structure.
+    /// When the Paths vector is filled this step for the And node has succeeded.
     child_paths: Vec<Path<'a>>,
 }
 
 pub struct OrStep<'a> {
+    /// The node from phase 1
     node: &'a OrNode,
+    /// the String where this match starts
     string: &'a str,
+    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
     match_len: usize,
+    /// The OR node needs only a single branch to succeed. This holds the successful path
     child_path: Box<Path<'a>>,
+    /// This points to the entry in **node.nodes** which is currently in the **child_path** element
     which: usize,
 }
 
@@ -52,16 +75,17 @@ pub struct OrStep<'a> {
 //
 // Path struct
 //
-// Conceptually a Path takes as many steps as it can along the target
-// string. A Path is a series of Steps along a particular branch, from
-// 0 up to the maximum number allowed, or the maximum number matched,
-// whichever is smaller. If continuing the search from the end of the
-// Path fails it backtracks a Step and tries again.
+/// Conceptually a Path takes as many steps as it can along the target
+/// string. A Path is a series of Steps along a particular branch, from
+/// 0 up to the maximum number allowed, or the maximum number matched,
+/// whichever is smaller. If continuing the search from the end of the
+/// Path fails it backtracks a Step and tries again.
 //
 //////////////////////////////////////////////////////////////////
 pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Set(Vec<SetStep<'a>>), And(Vec<AndStep<'a>>), Or(OrStep<'a>), None }
 
 impl<'a> Path<'a> {
+    /// length of the **Path** (the number of **Step**s it has)
     pub fn len(&self) -> usize {
         match self {
             Path::Chars(steps) => steps.len(),
@@ -72,6 +96,8 @@ impl<'a> Path<'a> {
             Path::None => 0,
         }
     }
+
+    /// the length of the match, in bytes. This means it can be used to extract the unicode string from the string element
     fn match_len(&self) -> usize {
         match self {
             Path::Chars(steps) =>    steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
@@ -83,7 +109,7 @@ impl<'a> Path<'a> {
         }
     }
     
-    // gets the remaining target string at current path position
+    /// gets the subset of the target string matched by this **Path**
     pub fn matched_string(&self) -> &'a str {
         let match_len = self.match_len();
         match self {
@@ -95,6 +121,8 @@ impl<'a> Path<'a> {
             Path::None => panic!("NONE unexpected"),
         }
     }
+
+    // returns the end of the string matched by this path
     fn string_end(&self) -> &'a str {
         let len = self.match_len();
         match self {
@@ -106,6 +134,12 @@ impl<'a> Path<'a> {
             Path::None => panic!("NONE unexpected"),
         }
     }
+
+    /// backs off a step on the path: when a path fails the process backtracks a step and tries again. This
+    /// actually handles both the lazy and the greedy cases: for greedy the initial path walks to the upper limit
+    /// or to failure, whichever is smaller, and backs off by removing a step from the path. For the lazy case
+    /// the initial path is the minimum length, and it case of failure it adds another step to the end, up to the
+    /// maximum limit
     fn pop(&mut self) -> bool {
         if let Path::And(steps) = self {
             let last = steps.len() - 1;
@@ -132,6 +166,7 @@ impl<'a> Path<'a> {
         ret
     }
 
+    /// implementation of pop() for lazy evaluation
     fn lazy_pop(&mut self) -> bool {
         self.limits().check(self.len() + 1) == 0
             && match self {
@@ -144,6 +179,7 @@ impl<'a> Path<'a> {
             }
     }
 
+    /// returns ths **Limit** object for the Path
     fn limits(&self) -> Limits {
         match self {
             Path::Chars(steps) =>    steps[0].node.limits(),
@@ -155,6 +191,8 @@ impl<'a> Path<'a> {
         }
     }
 
+    /// recursively creates **Report** objects for a path. For the branches (And and Or) this means recording itself
+    /// and then collecting from the children recursively. leaves just need to record themselves
     pub fn gather_reports(&'a self, char_start: usize, byte_start: usize) -> (Vec<Report>, usize) {
         let mut char_pos = char_start;
         let mut byte_pos = byte_start;
@@ -187,7 +225,8 @@ impl<'a> Path<'a> {
         }
         (reports, char_pos)
     }
-    
+
+    /// called when a Path has completed to print its trace, if debugging is enabled
     fn trace(self, level: u32, prefix: &'a str) -> Path {
         if trace(level) {
             trace_change_indent(-1);
@@ -266,6 +305,7 @@ impl<'a> Debug for Path<'a> {
 
 // Any way to make walk() generic?
 impl<'a> CharsStep<'a> {
+    /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a CharsNode, string: &'a str) -> Path<'a> {
         let mut steps = Vec::<CharsStep>::new();
         steps.push(CharsStep {node, string, match_len: 0});
@@ -285,6 +325,7 @@ impl<'a> CharsStep<'a> {
         Path::Chars(steps).trace(1, "end walk")
     }
     // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
+    /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<CharsStep<'a>> {
         let string = &self.string[self.match_len..];
         if self.node.matches(string) {
@@ -296,6 +337,7 @@ impl<'a> CharsStep<'a> {
 }
         
 impl<'a> SpecialStep<'a> {
+    /// start a Path using a special char, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a SpecialCharNode, string: &'a str) -> Path<'a> {
         let mut steps = Vec::<SpecialStep>::new();
         steps.push(SpecialStep {node, string, match_len: 0});
@@ -314,7 +356,8 @@ impl<'a> SpecialStep<'a> {
         }
         Path::Special(steps).trace(1, "end walk")
     }
-    fn step (&self) -> Option<SpecialStep<'a>> {
+    /// try to take a single step over a special character
+    fn step(&self) -> Option<SpecialStep<'a>> {
         let string = &self.string[self.match_len..];
         if self.node.matches(string) {
             let step = SpecialStep {node: self.node, string, match_len: char_bytes(string, 1)};
@@ -326,6 +369,7 @@ impl<'a> SpecialStep<'a> {
 }
 
 impl<'a> SetStep<'a> {
+    /// start a Path using a set to match, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a SetNode, string: &'a str) -> Path<'a> {
         let mut steps = Vec::<SetStep>::new();
         steps.push(SetStep {node, string, match_len: 0});
@@ -344,7 +388,8 @@ impl<'a> SetStep<'a> {
         }
         Path::Set(steps).trace(2, "end walk")
     }
-    fn step (&self) -> Option<SetStep<'a>> {
+    /// try to take a single step over a set of characters
+    fn step(&self) -> Option<SetStep<'a>> {
         let string = &self.string[self.match_len..];
         if self.node.matches(string) {
             let step = SetStep {node: self.node, string, match_len: char_bytes(string, 1)};
@@ -356,6 +401,7 @@ impl<'a> SetStep<'a> {
 }
 
 impl<'a> AndStep<'a> {
+    /// start a Path using an And node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a AndNode, string: &'a str) -> Path<'a> {
         let mut steps = Vec::<AndStep>::new();
         steps.push(AndStep {node, string, match_len: 0, child_paths: Vec::<Path<'a>>::new()});
@@ -375,7 +421,8 @@ impl<'a> AndStep<'a> {
         Path::And(steps).trace(2, "end walk")
     }
 
-    fn step (&self) -> Option<AndStep<'a>> {
+    /// try to take a single step matching an And node
+    fn step(&self) -> Option<AndStep<'a>> {
         let string0 = &self.string[self.match_len..];
         let mut step = AndStep {node: self.node,
                                 string: string0,
@@ -403,6 +450,9 @@ impl<'a> AndStep<'a> {
         Some(step)
     }
 
+    /// back off a step after a failed match: after taking a step back see if the path length still falls within
+    /// the desired limits, if it does continue along that new path to see if it succeeds, if not remove that child
+    /// and then back off on the preceding child. When all children have been exhausted the step has failed.
     fn back_off(&mut self) -> bool {
         if self.child_paths.is_empty() { return false; }
         loop {
@@ -414,6 +464,7 @@ impl<'a> AndStep<'a> {
         !self.child_paths.is_empty()
     }
 
+    /// Compiles a **Report** object from this path and its children after a successful search
     fn make_report(&self, char_start: usize, byte_start: usize) -> (Report, usize) {
         let mut reports = Vec::<Report>::new();
         let mut char_end = char_start;
@@ -433,8 +484,9 @@ impl<'a> AndStep<'a> {
     }
 }
                     
-    // OR is a little different: no repeat count, so its step() is not needed
+/// OR does not have a *step()* function because it cannot have a repeat count (to repeat an OR it must be enclosed in an AND)
 impl<'a> OrStep<'a> {
+    /// start a Path using an Or node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a OrNode, string: &'a str) -> Path<'a> {
         if trace(2) {
             let fake = OrStep {node, string, which: 0, child_path: Box::new(Path::None), match_len: 0};
@@ -451,15 +503,18 @@ impl<'a> OrStep<'a> {
         Path::Or(OrStep {node, string, which: node.nodes.len(), child_path: Box::new(Path::None), match_len: 0}).trace(2, "end walk1")
     }
 
+    /// Compiles a **Report** object from this path and its child after a successful search
     fn make_report(&self, char_start: usize, byte_start: usize) -> (Report, usize) {
         let (subreports, char_end) = self.child_path.gather_reports(char_start, byte_start);
         (Report {found: self.string.to_string(), name: None, pos: (char_start, char_end), bytes: (byte_start, byte_start + self.match_len), subreports}, char_end)
     }
 }
 
-// helper function to keep strings from being too long.
+/// Set the length a String can be before it is abbreviated
 pub fn set_abbrev_size(size: u32) { unsafe {ABBREV_LEN = size as usize; }}
 static mut ABBREV_LEN: usize = 5;
+/// **abbrev()** is used in the pretty-print of steps: The display prints out the string at the start of the step. If it is too
+/// long it distracts from the other output. **abbrev** limits the length of the displayed string by replacing its end with "..."
 fn abbrev(string: &str) -> String {
     let s:String = string.chars().take(unsafe {ABBREV_LEN}).collect();
     let dots = if s.len() == string.len() {""} else {"..."};

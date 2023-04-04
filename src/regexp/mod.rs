@@ -196,8 +196,8 @@ pub struct AndNode {
 #[derive(Default, PartialEq, Debug)]
 pub struct OrNode {
     nodes: Vec<Node>,
-    // Limits for OR nodes are different than the others. ORs cannot be repeated (except by enclosing them in
-    // an AND), so Limits is used for OR to move through the different branches rather than the different repetitions
+    /// Limits for OR nodes are different from other nodes. ORs cannot be repeated (except by enclosing them in
+    /// an AND), so Limits is used for OR to move through the different branches rather than the different repetitions
     lims: Limits,
 }
 
