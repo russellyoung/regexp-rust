@@ -18,8 +18,8 @@ fn make_special(special: char, min: usize, max: usize, lazy: bool) -> Node {
 fn make_root<'a> (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
 
 fn make_and<'a> (min: usize, max: usize, lazy: bool, name: Option<&'a str>) -> Node {
-    let report = {if let Some(n) = name {Some(n.to_string())} else {None}};
-    Node::And(AndNode{nodes: Vec::<Node>::new(), lims: Limits{min, max, lazy}, report, anchor: false})
+    let named = {if let Some(n) = name {Some(n.to_string())} else {None}};
+    Node::And(AndNode{nodes: Vec::<Node>::new(), lims: Limits{min, max, lazy}, named, anchor: false})
 }
 fn make_or() -> Node {
     Node::Or(OrNode{nodes: Vec::<Node>::new(), lims: Limits::default()})
@@ -158,7 +158,7 @@ fn set_basic() {
 fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
     let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
     let (path, start, b_start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("Expected \"{}\", didn't find anything", expected)).unwrap();
-    let report = crate::regexp::walk::Report::new(&path, start, b_start);
+    let report = crate::regexp::Report::new(&path, start, b_start);
     assert_eq!(report.found, expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, report.found);
 }       
         

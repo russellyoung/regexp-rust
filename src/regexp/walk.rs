@@ -222,7 +222,7 @@ impl<'a> Debug for AndStep<'a> {
         let mut child_counts: String = "".to_string();
         for p in self.child_paths.iter() { child_counts.push_str(&format!("{}, ", p.len())); }
         for _i in self.child_paths.len()..self.node.nodes.len() { child_counts.push_str("-, "); }
-        let name = { if let Some(name) = &self.node.report { format!("<{}>", name) } else { "".to_string()} };
+        let name = { if let Some(name) = &self.node.named { format!("<{}>", name) } else { "".to_string()} };
         write!(f, "AND{}({}){} state [{}], string {}", name, self.node.nodes.len(), self.node.limits().simple_display(), child_counts, abbrev(self.string))
     }
 }
@@ -425,7 +425,7 @@ impl<'a> AndStep<'a> {
             reports.append(&mut subreports);
         }
         (Report {found: self.string[0..self.match_len].to_string(),
-                 name: self.node.report.clone(),
+                 name: self.node.named.clone(),
                  pos: (char_start, char_end),
                  bytes: (byte_start, byte_start + self.match_len),
                  subreports: reports},

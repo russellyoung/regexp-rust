@@ -87,7 +87,7 @@ impl Node {
 
     // For the case abc\|XXX, break the preceding "abc" into "ab" and "c" since only the "c" binds with the OR
     fn chars_before_or(nodes: &mut Vec<Node>) {
-        let prev_is_chars = {if let Node::Chars(_) = &nodes[nodes.len() - 1] { true } else { false }};
+        let prev_is_chars = matches!(&nodes[nodes.len() - 1], Node::Chars(_));
         if prev_is_chars {
             let mut prev = nodes.pop().unwrap();
             let chars_node = prev.mut_chars_ref();
@@ -166,8 +166,8 @@ pub struct SpecialCharNode {
 pub struct AndNode {
     lims: Limits,
     nodes: Vec<Node>,
-    // REPORT == None means do not report, REPORT == "" means unnamed 
-    report: Option<String>,
+    // NAMED == None means do not report, NAMED == "" means unnamed 
+    named: Option<String>,
     anchor: bool
 }
 
@@ -235,7 +235,7 @@ impl TreeNode for SpecialCharNode {
 // format the limis for debugging
 impl TreeNode for AndNode {
     fn desc(&self, indent: isize) -> String {
-        let name = { if let Some(name) = &self.report { format!("<{}>", name)} else {"".to_string()}};
+        let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
         let mut msg = format!("{}AndNode({}) {} {}", pad(indent), self.nodes.len(), self.limits().simple_display(), name);
         for i in 0..self.nodes.len() {
             let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
@@ -351,7 +351,7 @@ impl AndNode {
 
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { entering("AND", chars); }
-        let report = AndNode::parse_named(chars)?;
+        let named = AndNode::parse_named(chars)?;
         let mut nodes = Vec::<Node>::new();
         loop {
             let (ch0, ch1) = chars.peek_2();
@@ -368,7 +368,7 @@ impl AndNode {
         let _ = chars.next();
         let _ = chars.next();
         Ok((if nodes.is_empty() { Node::None }
-           else { Node::And(AndNode {nodes, lims: Limits::parse(chars)?, report, anchor: false, })}).trace())
+           else { Node::And(AndNode {nodes, lims: Limits::parse(chars)?, named, anchor: false, })}).trace())
     }
 
     fn parse_named(chars: &mut Peekable) -> Result<Option<String>, Error> {
@@ -588,7 +588,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
         let path = tree.walk(start);
         if path.len() > 1 {
             if trace(1) { println!("--- Search succeeded ---") };
-            return Ok(Some((path, start_pos, char_bytes(&text, start_pos))));
+            return Ok(Some((path, start_pos, char_bytes(text, start_pos))));
         }
         if trace(1) {println!("==== WALK \"{}\": no match ====", start)};
         if root.anchor { break; }
@@ -828,7 +828,7 @@ pub struct Report {
 }
 
 impl Report {
-    pub fn new<'b>(root: &'b crate::regexp::walk::Path, char_start: usize, byte_start: usize) -> Report {
+    pub fn new(root: &crate::regexp::walk::Path, char_start: usize, byte_start: usize) -> Report {
         let (reports, _char_end)  = root.gather_reports(char_start, byte_start);
         reports[0].clone()
     }
@@ -840,12 +840,10 @@ impl Report {
         self.subreports.iter().for_each(move |r| r.display(indent + 1));
     }
 
-    pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<(&'b String, (usize, usize), (usize, usize))> {
-        let mut v = Vec::<(&'b String, (usize, usize), (usize, usize))>::new();
+    pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<&Report> {
+        let mut v = Vec::<&Report>::new();
         if let Some(n) = &self.name {
-            if n == name {
-                v.push((&self.found, self.pos, self.bytes));
-            }
+            if n == name { v.push(self); }
         }
         for r in &self.subreports {
             let mut x = r.get_by_name(name);
@@ -854,20 +852,17 @@ impl Report {
         v
     }
 
-    pub fn get_named<'b>(&'b self) -> HashMap<&'b str, Vec<(&'b String, (usize, usize), (usize, usize))>> {
-//        let mut hash = HashMap::<&String, Vec<(&'b String, (usize, usize), (usize, usize))>>::new();
+    pub fn get_named(& self) -> HashMap<&str, Vec<&Report>> {
         let hash = HashMap::new();
         self.get_named_internal(hash)
     }
     
-    fn get_named_internal<'b>(&'b self, mut hash: HashMap<&'b str, Vec<(&'b String, (usize, usize), (usize, usize))>>)
-                              -> HashMap<&'b str, Vec<(&'b String, (usize, usize), (usize, usize))>> {
+    fn get_named_internal<'b>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report>>) -> HashMap<&'b str, Vec<&Report>> {
         if let Some(name) = &self.name {
-            if let Some(mut_v) = hash.get_mut(&name.as_str()) { mut_v.push((&self.found, self.pos, self.bytes)); }
-            else {
-                let mut v = Vec::<(&'b String, (usize, usize), (usize, usize))>::new();
-                v.push((&self.found, self.pos, self.bytes));
-                hash.insert(&name.as_str(), v);
+            if let Some(mut_v) = hash.get_mut(&name.as_str()) {
+                mut_v.push(self);
+            } else {
+                hash.insert(name.as_str(), vec![self]);
             }
             for r in self.subreports.iter() {
                 hash = r.get_named_internal(hash);
