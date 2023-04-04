@@ -49,6 +49,7 @@ impl Node {
     /// checks whether the node is the special Node::None type, used to initialize structures and in case of errors. In general
     /// if the code finds this it means an error condition
     fn is_none(&self) -> bool { *self == Node::None }
+
     /// function that simply distributes a walk request to the proper XNode struct
     fn walk<'a>(&'a self, string: &'a str) -> walk::Path<'a> {
         match self {
@@ -73,8 +74,6 @@ impl Node {
             Node::None           => None,
         }
     }
-    // These are for internal use, not API, so any bad call is a programming error, not a user error. That is why tey
-    // panic rather than return Option
     // thank you rust-lang.org
     /// method to recover a mutable **OrNode** from its ""Node::Or**. It is a programming error ro call this on any other type, if it is it panics.
     fn mut_or_ref(&mut self)   -> &mut OrNode    { if let Node::Or(node)    = self { node } else { panic!("Trying for mut ref to OrNode from wrong Node type"); } }
@@ -142,7 +141,7 @@ impl Node {
 
     /// Called on Node creation, so if the race level is 2 or higher a message is output on node creation
     /// **Important:** This function decreases the indent depth when called from AND or OR. It should be at the same trace level as
-    /// the *entering()* call, which increases the indent when AND or OR are entered.
+    /// the *trace_enter()* call, which increases the indent when AND or OR are entered.
     fn trace(self) -> Self {
         if trace(2) {
             match (&self, &self) {
@@ -157,7 +156,7 @@ impl Node {
 /// A debugging/trace function, called when a node starts parsing the RE. It should only be called after checking he trace level.
 /// **Important:** This function increases the indent depth when called from AND or OR. It should be at the same trace level as
 /// the *Node::trace()* call, which reduces the indent when AND or OR are exited.
-fn entering(name: &str, chars: &mut Peekable) {
+fn trace_enter(name: &str, chars: &mut Peekable) {
     let chs = chars.peek_n(3);
     println!("{}{} starting from \"{}{}{}\"", trace_indent(), name, chs[0].unwrap(), chs[1].unwrap(), chs[2].unwrap_or(' '));
     if name == "AND" || name == "OR" { trace_change_indent(1); }
@@ -303,7 +302,7 @@ impl CharsNode {
     const ESCAPE_CODES: &str = "ntdula()|";
 
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { entering("CHARS", chars); }
+        if trace(2) { trace_enter("CHARS", chars); }
         let mut chs = Vec::<char>::new();
         loop {
             match chars.peek_2() {
@@ -344,8 +343,9 @@ impl SpecialCharNode {
     // called with pointer at a special character. Char can be '.' or "\*". For now I'm assuming this only gets called with special
     // sequences at bat, so no checking is done.
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { entering("SPECIAL", chars); }
+        if trace(2) { trace_enter("SPECIAL", chars); }
         let special = if let Some(ch) = chars.next() {
+            // single character special chars. All the others start with '\'
             if ".$".contains(ch) { ch }
             else if let Some(_ch1) = chars.peek() { chars.next().unwrap() }   // ch1 is next(), doing it this way gets the same value and pops it off
             else { return Ok(Node::None); }
@@ -371,7 +371,7 @@ impl AndNode {
     fn push(&mut self, node: Node) { self.nodes.push(node); }
 
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { entering("AND", chars); }
+        if trace(2) { trace_enter("AND", chars); }
         let named = AndNode::parse_named(chars)?;
         let mut nodes = Vec::<Node>::new();
         loop {
@@ -386,14 +386,14 @@ impl AndNode {
             }
         }
         // pop off terminating chars
-        let _ = chars.next();
-        let _ = chars.next();
+        let (_, _) = (chars.next(), chars.next());
         Ok((if nodes.is_empty() { Node::None }
            else { Node::And(AndNode {nodes, lims: Limits::parse(chars)?, named, anchor: false, })}).trace())
     }
 
     fn parse_named(chars: &mut Peekable) -> Result<Option<String>, Error> {
         match chars.peek_2() {
+            // named match
             (Some('?'), Some('<')) => {
                 let (_, _) = (chars.next(), chars.next());
                 let mut chs = Vec::<char>::new();
@@ -407,10 +407,12 @@ impl AndNode {
                 }
                 Ok(Some(chs.into_iter().collect()))
             },
+            // silent match: make no record of it
             (Some('?'), _) => {
                 let _ = chars.next();
                 Ok(None)
             },
+            // nameless match
             _ => Ok(Some("".to_string())),
         }
     }
@@ -420,7 +422,7 @@ impl OrNode {
     fn push(&mut self, node: Node) { self.nodes.push(node); }
     fn push_front(&mut self, node: Node) { self.nodes.insert(0, node); }
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { entering("OR", chars); }
+        if trace(2) { trace_enter("OR", chars); }
         let mut nodes = Vec::<Node>::new();
         let mut node = parse(chars)?;
         if !node.is_none() {
@@ -436,7 +438,7 @@ impl SetNode {
     fn push(&mut self, set: Set) { self.targets.push(set); }
     
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { entering("SET", chars); }
+        if trace(2) { trace_enter("SET", chars); }
         let mut targets = Vec::<Set>::new();
         let mut not = false;
         if let Some(ch) = chars.peek() {
@@ -548,10 +550,8 @@ pub fn parse_tree(input: &str) -> Result<Node, Error> {
         let and_node = outer_and.mut_and_ref();
         and_node.anchor = true;
     }
-    match chars.next() {
-        Some(_) => Err(Error::make(5, "Extra characters after parse completed")),
-        None => Ok(outer_and),
-    }
+    if let Some(_) = chars.next() { Err(Error::make(5, "Extra characters after parse completed")) }
+    else { Ok(outer_and) }
 }
 
 /// main controller for the tree parse processing, it looks at the next few characters in the pipeline, decides what they are, and
@@ -569,8 +569,7 @@ fn parse(chars: &mut Peekable) -> Result<Node, Error> {
             if ch1 == '\\' { CharsNode::parse_node(chars) }
             else { SpecialCharNode::parse_node(chars) }
         } else {
-            let _ = chars.next();
-            let _ = chars.next();
+            let (_, _) = (chars.next(), chars.next());
             if ch1 == '(' { AndNode::parse_node(chars) }
             else { OrNode::parse_node(chars) }
         }
@@ -646,9 +645,7 @@ pub struct Limits {
     lazy: bool,
 }
 
-impl Default for Limits {
-    fn default() -> Limits { Limits{min: 1, max: 1, lazy: false} }
-}
+impl Default for Limits { fn default() -> Limits { Limits{min: 1, max: 1, lazy: false} } }
 
 impl Limits {
     /// Display every Limit in a *{min, max}* format for debugging
@@ -696,7 +693,7 @@ impl Limits {
     /// Returns: <0 if NUM is < min; 0 if NUM is in the range min <= NUM <= ,ax (but SEE WARNING BELOW: NUM needs
     /// to be adjusted to account for the 0-match possibility.
     ///
-    /// Beware: the input is usize and is in general the length of steps vector.
+    /// **Beware**: the input is usize and is in general the length of steps vector.
     /// This has a 0-match in its first position, so the value entered is actually one higher than the allowed value.
     /// I considered subtracting 1 from the number to make it match, but because the arg is usize and is sometimes 0
     /// it is better to leave it like this.

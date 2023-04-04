@@ -330,11 +330,8 @@ impl<'a> CharsStep<'a> {
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<CharsStep<'a>> {
         let string = &self.string[self.match_len..];
-        if self.node.matches(string) {
-            Some(CharsStep {node: self.node, string, match_len: self.node.string.len()})
-        } else {
-            None
-        }
+        if self.node.matches(string) { Some(CharsStep {node: self.node, string, match_len: self.node.string.len()}) }
+        else { None }
     }
 }
         
@@ -361,12 +358,8 @@ impl<'a> SpecialStep<'a> {
     /// try to take a single step over a special character
     fn step(&self) -> Option<SpecialStep<'a>> {
         let string = &self.string[self.match_len..];
-        if self.node.matches(string) {
-            let step = SpecialStep {node: self.node, string, match_len: char_bytes(string, 1)};
-            Some(step)
-        } else {
-            None
-        }
+        if self.node.matches(string) { Some( SpecialStep {node: self.node, string, match_len: char_bytes(string, 1)}) }
+        else { None }
     }
 }
 
@@ -393,12 +386,8 @@ impl<'a> SetStep<'a> {
     /// try to take a single step over a set of characters
     fn step(&self) -> Option<SetStep<'a>> {
         let string = &self.string[self.match_len..];
-        if self.node.matches(string) {
-            let step = SetStep {node: self.node, string, match_len: char_bytes(string, 1)};
-            Some(step)
-        } else {
-            None
-        }
+        if self.node.matches(string) { Some(SetStep {node: self.node, string, match_len: char_bytes(string, 1)}) } else
+        { None }
     }
 }
 

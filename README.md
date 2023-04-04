@@ -69,6 +69,10 @@ a single superclass/trait that would eliminate the need for duplicate
 code, switching methods in Path, and the distinctions between the
 different Nodes and Steps.
 
+And maybe writing a few more tests Peekable and Report are not being tested
+yet. But it is hard to get too enthusiastic about it anymore.
+
+
 ### _Final comments_
 
 In any case, I'm ready to take a break from Rust. 2 programs, each one

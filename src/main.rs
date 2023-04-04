@@ -116,9 +116,6 @@ fn pad(x: isize) -> String {
 // 
 
 /// A structure used to read and parse command line arguments when the program is run
-/// line 2
-///
-/// line 3
 #[derive(Parser, Debug)]
 #[command(author, version, about, verbatim_doc_comment)]
 pub struct Config {
@@ -173,27 +170,23 @@ pub fn main() {
             return;
         }
     };
-    if config.interactive {
-        return Interactive::new(config).run();
-    }
-    set_trace(config.debug);
     crate::regexp::walk::set_abbrev_size(config.abbrev);
+    
+    if config.interactive { return Interactive::new(config).run(); }
+    
+    set_trace(config.debug);
     // execution starts
-    let tree = match regexp::parse_tree(&config.re) {
-        Ok(node) => node,
-        Err(error) => {
-            println!("{}", error);
-            return;
-        },
-    };
-    if config.tree {
-        println!("--- Parse tree:\n{:?}", tree);
-    }
-    if !config.text.is_empty() {
-        match regexp::walk_tree(&tree, &config.text) {
-            Ok(Some((path, char_start, bytes_start))) => Report::new(&path, char_start, bytes_start).display(0),
-            Ok(None) => println!("No match"),
-            Err(error) => println!("{}", error)
+    match regexp::parse_tree(&config.re) {
+        Err(error) => println!("{}", error),
+        Ok(tree) => {
+            if config.tree { println!("--- Parse tree:\n{:?}", tree); }
+            if !config.text.is_empty() {
+                match regexp::walk_tree(&tree, &config.text) {
+                    Ok(Some((path, char_start, bytes_start))) => Report::new(&path, char_start, bytes_start).display(0),
+                    Ok(None) => println!("No match"),
+                    Err(error) => println!("{}", error)
+                }
+            }
         }
     }
 }

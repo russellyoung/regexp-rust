@@ -44,7 +44,7 @@ pub struct Interactive {
 
 const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtsfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)[^0-9]\|$ *\(?<tail>.*\)\)?\)";
 
-/// helptext to display
+/// help text to display
 const HELP_TEXT: &str = r"
 This is an interactive interface to the regexp search engine. The program keeps stacks of
 regular expressions and search texts and uses them to run searches. Besides simple searching
@@ -81,6 +81,18 @@ fn get_var<'a>(vars: &HashMap<&'a str, Vec<&'a Report>>, name: &'a str) -> &'a s
     if let Some(var) = vars.get(name) { var[0].found.as_str() } else { "" }
 }
 
+/// parse the command from the possily abbreviated version passed in
+fn get_command(cmd: &str) -> &str {
+    if cmd.is_empty() { "" }
+    else if "re".starts_with(cmd) { "re" }
+    else if "text".starts_with(cmd) { "text" }
+    else if "search".starts_with(cmd) { "search" }
+    else if "tree".starts_with(cmd) { "tree" }
+    else if "walk".starts_with(cmd) { "walk" }
+    else if "help".starts_with(cmd) || "?" == cmd { "help" }
+    else { "unrecognized"}
+}
+    
 impl Interactive {
     /// constructor for the session object
     pub fn new(config: Config) -> Interactive {
@@ -112,7 +124,7 @@ impl Interactive {
                 Ok(0) => { break; },
                 Ok(1) => (),
                 Ok(_x) => {
-                    let  _ = buffer.pop();
+                    let  _ = buffer.pop();    // pop off trailing CR
                     if !self.do_command(&buffer) {break; }
                 },
                 Err(_msg) => { break;},
@@ -157,58 +169,26 @@ impl Interactive {
     /// execute the user commands
     fn execute_command(&mut self, cmd: &str, subcmd: &str, num: &str, tail: &str, body: &str, all: &str) -> bool{
         //println!("cmd: '{}', subcmd: '{}', num: '{}', tail: '{}', body: '{}', all: '{}'", cmd, subcmd, num, tail, body, all);
-        if cmd.is_empty() {
-            if !self.guess_re(all) { println!("Unrecognized command"); }
-        } else if "re".starts_with(cmd) {self.do_re(subcmd, num, tail, body); }
-        else if "text".starts_with(cmd) { self.do_text(subcmd, num, tail, body); }
-        else if "tree".starts_with(cmd) {
-            if let Some(re) = self.re() {
-                match parse_tree(re) {
-                    Ok(node) => println!("--- Parse tree:\n{:?}", node),
-                    Err(error) => println!("Error parsing tree: {}", error),
-                }
-            } else { println!("No current RE, first enter one"); }
-        } else if "search".starts_with(cmd) {
-            let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return true; }};
-            let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return true; }};
-            println!("Searching for \"{}\" in \"{}\"", re, text);
-            match parse_tree(re) {
-                Ok(node) => {
-                    match walk_tree(&node, text) {
-                        Ok(Some((path, char_start, bytes_start))) => {
-                            let report = Report::new(&path, char_start, bytes_start);
-                            if subcmd.is_empty() { println!("{:?}", report.display(0)); }
-                            else {
-                                let matches = report.get_by_name(subcmd);
-                                if matches.is_empty() { println!("No named matches for \"{}\"", subcmd); }
-                                else {
-                                    for i in 0..matches.len() { println!("  {}) \"{}\", position {}", i, matches[i].found, matches[i].pos.0); }
-                                }
-                            }
-                        },                                    
-                        Ok(None) => println!("No match"),
-                        Err(error) => println!("Error in search: {}", error)
+        match get_command(cmd) {
+            "" => { if !all.is_empty() && !self.guess_re(all) { println!("Unrecognized command"); }},
+            "re" => self.do_re(subcmd, num, tail, body),
+            "text" => self.do_text(subcmd, num, tail, body),
+            "search" => self.do_search(subcmd),
+            "help" | "?" => println!("{}", HELP_TEXT),
+            "walk" => self.do_walk(),
+            "quit" => { return false; },
+            "exit" => { if yorn("Really exit?", Some(true)) { return false; } }
+            "tree" => {
+                if let Some(re) = self.re() {
+                    match parse_tree(re) {
+                        Ok(node) => println!("--- Parse tree:\n{:?}", node),
+                        Err(error) => println!("Error parsing tree: {}", error),
                     }
-                },
-                Err(error) => { println!("Error parsing tree: {}", error); return true; },
-            }
-        } else if "walk".starts_with(cmd) {
-            let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return true; }};
-            let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return true; }};
-            match parse_tree(re) {
-                Ok(node) => {
-                    set_trace(2);
-                    match walk_tree(&node, text) {
-                        Ok(Some((path, char_start, bytes_start))) => println!("{:?}", Report::new(&path, char_start, bytes_start).display(0)),
-                        Ok(None) => println!("No match"),
-                        Err(error) => println!("Error in search: {}", error)
-                    }
-                    set_trace(0);
-                },
-                Err(error) => { println!("Error parsing tree: {}", error); return true; },
-            }
-        } else if "help".starts_with(cmd) || cmd == "?" { println!("{}", HELP_TEXT); }
-        else if "quit".starts_with(cmd) || ("exit".starts_with(cmd) && yorn("Really exit?", Some(true))) { return false; }
+                } else { println!("No current RE, first enter one"); }
+            },
+            "unrecognized" => println!("unrecognized command"),
+            _ => (),
+        }
         true
     }
 
@@ -270,6 +250,49 @@ impl Interactive {
             if self.texts.is_empty() { println!("No current text"); }
             else { println!("current text is \"{}\"", self.texts[self.texts.len() - 1]); }
         } else { self.texts.push(body.to_string()); }
+    }
+
+    fn do_search(&self, subcmd: &str) {
+        let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return;}};
+        let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return; }};
+        println!("Searching for \"{}\" in \"{}\"", re, text);
+        match parse_tree(re) {
+            Ok(node) => {
+                match walk_tree(&node, text) {
+                    Ok(Some((path, char_start, bytes_start))) => {
+                        let report = Report::new(&path, char_start, bytes_start);
+                        if subcmd.is_empty() { println!("{:?}", report.display(0)); }
+                        else {
+                            let matches = report.get_by_name(subcmd);
+                            if matches.is_empty() { println!("No named matches for \"{}\"", subcmd); }
+                            else {
+                                for i in 0..matches.len() { println!("  {}) \"{}\", position {}", i, matches[i].found, matches[i].pos.0); }
+                            }
+                        }
+                    },                                    
+                    Ok(None) => println!("No match"),
+                    Err(error) => println!("Error in search: {}", error)
+                }
+            },
+            Err(error) => { println!("Error parsing tree: {}", error); },
+        }
+    }
+
+    fn do_walk(&self) {
+        let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return; }};
+        let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return; }};
+        match parse_tree(re) {
+            Ok(node) => {
+                set_trace(2);
+                match walk_tree(&node, text) {
+                    Ok(Some((path, char_start, bytes_start))) => println!("{:?}", Report::new(&path, char_start, bytes_start).display(0)),
+                    Ok(None) => println!("No match"),
+                    Err(error) => println!("Error in search: {}", error)
+                }
+                set_trace(0);
+            },
+            Err(error) => println!("Error parsing tree: {}", error),
+        }
     }
 }
 
