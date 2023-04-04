@@ -1,3 +1,34 @@
+//! ## Interactive Regular Expression Search
+//! This module provides an interactive application that allows a user to enter several regular expression and text strings,
+//! and then perform searches. It can be useful when trying to write a complicated regular expression to try it out as you go.
+//! 
+//! In addition, it provides features to dump out the regular expression tree and trace the walk phase as it looks for a match
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+//! 
+
+
 use crate::regexp::*;
 use crate::set_trace;
 use crate::Config;
@@ -16,7 +47,7 @@ pub struct Interactive {
     abbrev: u32,
 }
 
-const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)[^0-9]\|$ *\(?<tail>.*\)\)?\)";
+const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtsfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)[^0-9]\|$ *\(?<tail>.*\)\)?\)";
 const HELP_TEXT: &str = r"
 This is an interactive interface to the regexp search engine. The program keeps stacks of
 regular expressions and search texts and uses them to run searches. Besides simple searching
@@ -28,28 +59,24 @@ meaning of ambiguous commands. The commands and subcommands can be abbreviated w
 first couple unique letters.
 
 The commands are:
- - re: 
-   -   display the current active regular expression
-   - re [set] REGULAREXPRESSION: sets a new regular expression to be the current one. The 
-       SET keyword is optional, if not given the program usually will guess the text is
-       intended as a regular expression. Only in the rare case when the text starts with a 
-       keyword is the SET subcommand required.
-   - re history: lists the most recent regular expressions
-   - re NUMBER: sets the NUMBERth item on the history list to be the current regular expression
-   - re pop: pops off (deletes) the current re from the list
- - text:
-   - displays the current active text string
-   - text TEXT: sets a new regular expression to be the current one. The 
-       SET keyword is optional, if not given the program usually will guess the text is
-       intended as a regular expression. Only in the rare case when the text starts with a 
-       keyword is the SET subcommand required.
-   - text history: lists the most recent regular expressions
-   - text NUMBER: sets the NUMBERth item on the history list to be the current regular expression
-   - text pop: pops off (deletes) the current re from the list
- - find: performs a RE search using the current RE and the current text
- - tree: displays the parse tree created in the first stage of the RE search using the current RE
- - walk: displays the progress as the tree is walked in stage 2 of the search
- - help: displays this help
+ - re:           display the current active regular expression
+ - re [set] RE:  sets a new regular expression to be the current one. The 
+                 SET keyword is optional, if not given the program usually will guess the text is
+                 intended as a regular expression. Only in the rare case when the text starts with a 
+                 keyword is the SET subcommand required.
+ - re history:   lists the most recent regular expressions
+ - re NUMBER:    sets the NUMBERth item on the history list to be the current regular expression
+ - re pop:       pops off (deletes) the current re from the list
+ - text:         displays the current active text string
+ - text TEXT:    sets new search text
+ - text history: lists the most recent regular expressions
+ - text NUMBER:  sets the NUMBERth item on the history list to be the current regular expression
+ - text pop:     pops off (deletes) the current re from the list
+ - search:       performs a RE search using the current RE and the current text
+ - tree:         displays the parse tree created in the first stage of the RE search using the current RE
+ - walk:         displays the progress as the tree is walked in stage 2 of the search
+ - help:         displays this help
+ - ?:            displays this help
 ";
 fn get_var<'a>(vars: &HashMap<&'a str, Vec<&'a Report>>, name: &'a str) -> &'a str {
     if let Some(var) = vars.get(name) { var[0].found.as_str() } else { "" }
@@ -69,6 +96,9 @@ impl Interactive {
                       abbrev: config.abbrev,
         }
     }
+
+    fn re(&self) -> Option<&str> { if self.res.is_empty() { None } else { Some(self.res[self.res.len() - 1].as_str()) }}
+    fn text(&self) -> Option<&str> { if self.texts.is_empty() { None } else { Some(self.texts[self.texts.len() - 1].as_str()) }}
     
     pub fn run(&mut self) {
         let stdin = io::stdin();
@@ -123,7 +153,7 @@ impl Interactive {
             self.execute_command("", "", "", "", "", input)
         }
     }
-
+    
     fn execute_command(&mut self, cmd: &str, subcmd: &str, num: &str, tail: &str, body: &str, all: &str) -> bool{
         //println!("cmd: '{}', subcmd: '{}', num: '{}', tail: '{}', body: '{}', all: '{}'", cmd, subcmd, num, tail, body, all);
         if cmd.is_empty() {
@@ -131,20 +161,30 @@ impl Interactive {
         } else if "re".starts_with(cmd) {self.do_re(subcmd, num, tail, body); }
         else if "text".starts_with(cmd) { self.do_text(subcmd, num, tail, body); }
         else if "tree".starts_with(cmd) {
-            if self.res.is_empty() { println!("No current RE, first enter one"); }
-            else {
-                match parse_tree(&self.res[self.res.len() - 1]) {
+            if let Some(re) = self.re() {
+                match parse_tree(re) {
                     Ok(node) => println!("--- Parse tree:\n{:?}", node),
                     Err(error) => println!("Error parsing tree: {}", error),
                 }
-            }
-        } else if "find".starts_with(cmd) {
-            let re = {if !self.res.is_empty() { &self.res[self.res.len() - 1] } else { println!("No current RE"); return true; }};
-            let text = {if !self.texts.is_empty() { &self.texts[self.texts.len() - 1] } else { println!("No current text"); return true; }};
+            } else { println!("No current RE, first enter one"); }
+        } else if "search".starts_with(cmd) {
+            let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return true; }};
+            let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return true; }};
+            println!("Searching for \"{}\" in \"{}\"", re, text);
             match parse_tree(re) {
                 Ok(node) => {
                     match walk_tree(&node, text) {
-                        Ok(Some((path, char_start, bytes_start))) => println!("{:?}", Report::new(&path, char_start, bytes_start).display(0)),
+                        Ok(Some((path, char_start, bytes_start))) => {
+                            let report = Report::new(&path, char_start, bytes_start);
+                            if subcmd.is_empty() { println!("{:?}", report.display(0)); }
+                            else {
+                                let matches = report.get_by_name(subcmd);
+                                if matches.is_empty() { println!("No named matches for \"{}\"", subcmd); }
+                                else {
+                                    for i in 0..matches.len() { println!("  {}) \"{}\", position {}", i, matches[i].found, matches[i].pos.0); }
+                                }
+                            }
+                        },                                    
                         Ok(None) => println!("No match"),
                         Err(error) => println!("Error in search: {}", error)
                     }
@@ -152,8 +192,8 @@ impl Interactive {
                 Err(error) => { println!("Error parsing tree: {}", error); return true; },
             }
         } else if "walk".starts_with(cmd) {
-            let re = {if !self.res.is_empty() { &self.res[self.res.len() - 1] } else { println!("No current RE"); return true; }};
-            let text = {if !self.texts.is_empty() { &self.texts[self.texts.len() - 1] } else { println!("No current text"); return true; }};
+            let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return true; }};
+            let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return true; }};
             match parse_tree(re) {
                 Ok(node) => {
                     set_trace(2);
@@ -170,7 +210,7 @@ impl Interactive {
         else if "quit".starts_with(cmd) || ("exit".starts_with(cmd) && yorn("Really exit?", Some(true))) { return false; }
         true
     }
-
+    
     fn do_re(&mut self, subcmd: &str, num: &str, tail: &str, body: &str, ) {
         if !num.is_empty() {
             if let Ok(num) = num.parse::<usize>() {
@@ -184,8 +224,8 @@ impl Interactive {
         } else if !subcmd.is_empty() {
             if "pop".starts_with(subcmd) {
                 let _ = self.res.pop();
-                if self.res.is_empty() { println!("No current RE"); }
-                else { println!("current RE is \"{}\"", self.res[self.res.len() - 1]); }
+                if let Some(re) = self.re() {println!("current RE is \"{}\"", re); }
+                else { println!("No current RE"); }
             } else if "history".starts_with(subcmd) {
                 let len = self.res.len();
                 if len == 0 { println!("No saved REs"); }
@@ -213,8 +253,8 @@ impl Interactive {
         } else if !subcmd.is_empty() {
             if "pop".starts_with(subcmd) {
                 let _ = self.texts.pop();
-                if self.texts.is_empty() { println!("No current text"); }
-                else { println!("current text is \"{}\"", self.texts[self.texts.len() - 1]); }
+                if let Some(text) = self.text() {println!("current text is \"{}\"", text); }
+                else { println!("No current text"); }
             } else if "set".starts_with(subcmd) { self.texts.push(tail.to_string()); }
             else if "history".starts_with(subcmd) {
                 let len = self.texts.len();

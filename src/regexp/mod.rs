@@ -1,8 +1,11 @@
+//! ## Regular expression search: RE parser
+//! This module offers all functionality for RE searches. It contains the code to parse the RE into a tree, and also exports
+//! the functionality to walk the tree and display the results.
+//! 
+//! The REs are parsed with the function *parse_tree()*, which returns a tree (actually an **AndNode**, which is the root of the tree)
+//! which can then be used in the walk phase to look for matches.
 // TODO:
-// - lazy: implement lazy evaluation
-// - named substrings
 // - refactor: especially in WALK there seems to be a lot of repeat code. Using traits I think a lot can be consolidated
-// - more special chars: for now it just has \N for numeric and . for any, need to add $, ^, ascii, upper case, lower case, whitespace, ...
 pub mod walk;
 #[cfg(test)]
 mod tests;
@@ -12,8 +15,8 @@ use crate::{pad, trace, trace_indent, trace_change_indent, trace_set_indent};
 use core::fmt::{Debug,};
 use std::collections::HashMap;
 
-const PEEKED_SANITY_SIZE: usize = 20;           // sanity check: peeked stack should not grow large
-const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap for *
+/// big number to server as a cap for repetition count
+const EFFECTIVELY_INFINITE: usize = 99999999;
 
 //////////////////////////////////////////////////////////////////
 //
@@ -30,6 +33,9 @@ const EFFECTIVELY_INFINITE: usize = 99999999;   // big number to server as a cap
 // type for everything. I think that would work well, but in the end I don't see a big advantage over using enums.
 //
 //////////////////////////////////////////////////////////////////
+
+/// Node acts as a common wrapper for the different XNode struct types: CharsNode, SpecialNode, SetNode, AndNode, and OrNode.
+/// Besides serving as a common strcut to distribute message requests, it also behaves like Box in providing a place in memory for the structures to live.
 #[derive(PartialEq)]
 pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Set(SetNode), None, }
 
@@ -40,7 +46,10 @@ impl core::fmt::Debug for Node {
 }
 
 impl Node {
+    /// checks whether the node is the special Node::None type, used to initialize structures and in case of errors. In general
+    /// if the code finds this it means an error condition
     fn is_none(&self) -> bool { *self == Node::None }
+    /// function that simply distributes a walk request to the proper XNode struct
     fn walk<'a>(&'a self, string: &'a str) -> walk::Path<'a> {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, string),
@@ -52,7 +61,8 @@ impl Node {
         }
     }
 
-    // Get the node object from inside its enum wrapper
+    /// Gets the node object from inside its enum wrapper as a TreeNode. This is currently of limited use, the code mayy be refactored to move more
+    /// functionality into the TreeNode trait.
     fn tree_node(&self) -> Option<&dyn TreeNode> {
         match self {
             Node::Chars(a)       => Some(a),
@@ -66,8 +76,12 @@ impl Node {
     // These are for internal use, not API, so any bad call is a programming error, not a user error. That is why tey
     // panic rather than return Option
     // thank you rust-lang.org
+    /// method to recover a mutable **OrNode** from its ""Node::Or**. It is a programming error ro call this on any other type, if it is it panics.
     fn mut_or_ref(&mut self)   -> &mut OrNode    { if let Node::Or(node)    = self { node } else { panic!("Trying for mut ref to OrNode from wrong Node type"); } }
+    /// method to recover a mutable **AndNode** from its ""Node::And**. It is a programming error ro call this on any other type, if it is it panics.
+    /// so it panics if called on anything but an **OrNode**
     fn mut_and_ref(&mut self)  -> &mut AndNode   { if let Node::And(node)   = self { node } else { panic!("Trying for mut ref to AndNode from wrong Node type"); } }
+    /// method to recover a mutable **CharsNode** from its ""Node::Chars**. It is a programming error ro call this on any other type, if it is it panics.
     fn mut_chars_ref(&mut self)-> &mut CharsNode { if let Node::Chars(node) = self { node } else { panic!("Trying for mut ref to CharsNode from wrong Node type"); } }
 
     //
@@ -75,8 +89,9 @@ impl Node {
     // to get the right behavior sometimes special tweaking is needed.
     //
     
-    // This is to handle the case "XXX\|abcd" where a string of chars follows an AND. Only the first char should bind to the
-    // OR. This method returns theany extra characters to the queue. If the Node is not Chars it does nothing.
+    /// Using \| for OR in a re requires special handling in the tree. This is one of the methods which alters the tree to include an OR node.
+    /// When an OR node is finishing its parsing it has already consumed the following unit. If that unit is a character string only the first char
+    /// should be bound to the OR. This returns any subsequent characters to the processing queue so they can be redone.
     fn chars_after_or(&mut self, chars: &mut Peekable) {
         if let Node::Chars(chars_node) = self {
             while chars_node.string.len() > 1 {
@@ -85,7 +100,8 @@ impl Node {
         }
     }
 
-    // For the case abc\|XXX, break the preceding "abc" into "ab" and "c" since only the "c" binds with the OR
+    /// Using \| for OR in a re requires special handling in the tree. This is one of the methods which alters the tree to include an OR node
+    /// For the case abc\|XXX, break the preceding "abc" into "ab" and "c" since only the "c" binds with the OR
     fn chars_before_or(nodes: &mut Vec<Node>) {
         let prev_is_chars = matches!(&nodes[nodes.len() - 1], Node::Chars(_));
         if prev_is_chars {
@@ -100,13 +116,13 @@ impl Node {
             }                
         }
     }
-    // This handles the case where an OR is being inserted ino an AND.
-    //  - If the preceding node is an OR this OR node gets discarded and its condition is appended to the
-    //    existing one.
-    //  - If the preceding node is not an OR then that node is removed from the AND list and inserted as the
-    //    first element in the OR list.
-    //  - In addition, if the preceding node is CHARS and its length is >1 it needs to be split, since the
-    //    OR only binds a single character
+    /// This handles the case where an OR is being inserted ino an AND.
+    ///  - If the preceding node is an OR this OR node gets discarded and its condition is appended to the
+    ///    existing one.
+    ///  - If the preceding node is not an OR then that node is removed from the AND list and inserted as the
+    ///    first element in the OR list.
+    ///  - In addition, if the preceding node is CHARS and its length is >1 it needs to be split, since the
+    ///    OR only binds a single character
     fn or_into_and(mut self, nodes: &mut Vec<Node>) {
         if nodes.is_empty() { return; }
         Node::chars_before_or(nodes);
@@ -124,6 +140,9 @@ impl Node {
         }
     }
 
+    /// Called on Node creation, so if the race level is 2 or higher a message is output on node creation
+    /// **Important:** This function decreases the indent depth when called from AND or OR. It should be at the same trace level as
+    /// the *entering()* call, which increases the indent when AND or OR are entered.
     fn trace(self) -> Self {
         if trace(2) {
             match (&self, &self) {
@@ -135,7 +154,9 @@ impl Node {
         self
     }
 }
-
+/// A debugging/trace function, called when a node starts parsing the RE. It should only be called after checking he trace level.
+/// **Important:** This function increases the indent depth when called from AND or OR. It should be at the same trace level as
+/// the *Node::trace()* call, which reduces the indent when AND or OR are exited.
 fn entering(name: &str, chars: &mut Peekable) {
     let chs = chars.peek_n(3);
     println!("{}{} starting from \"{}{}{}\"", trace_indent(), name, chs[0].unwrap(), chs[1].unwrap(), chs[2].unwrap_or(' '));
@@ -146,22 +167,22 @@ fn entering(name: &str, chars: &mut Peekable) {
 // Node structure definitions: these all implement TreeNode
 //
 
-// handles strings of regular characters
-// Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
+/// represents strings of regular characters that match themselves in the target string. This is a leaf node in the parse tree.
+/// Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
 #[derive(Default, Debug, PartialEq)]
 pub struct CharsNode {
     lims: Limits,
     string: String,
 }
 
-// handles special characters like ".", \d, etc.
+/// handles matching special characters like ".", \d, etc. This is a leaf node in the parse tree.
 #[derive(Default, Debug, PartialEq)]
 pub struct SpecialCharNode {
     lims: Limits,
     special: char,
 }
 
-// handles AND (sequential) matches
+/// handles AND (sequential) matches: this node represents a branch in the parse tree
 #[derive(Default, Debug, PartialEq)]
 pub struct AndNode {
     lims: Limits,
@@ -171,7 +192,7 @@ pub struct AndNode {
     anchor: bool
 }
 
-// handles A\|B style matches
+/// handles OR nodes (A\|B style matches). This node represents a branch in the parse tree
 #[derive(Default, PartialEq, Debug)]
 pub struct OrNode {
     nodes: Vec<Node>,
@@ -180,7 +201,7 @@ pub struct OrNode {
     lims: Limits,
 }
 
-// handles [a-z] style matches
+/// handles [a-z] style matches. This node represents a branch in the parse tree
 #[derive(Default, PartialEq, Debug)]
 pub struct SetNode {
     lims: Limits,
@@ -199,16 +220,16 @@ pub struct SetNode {
 //
 //////////////////////////////////////////////////////////////////
 
+/// TreeNode represents common methods among the Nodes. I may refactor the code in the future by adding more methods to make this more usefui.
 pub trait TreeNode {
+    /// **desc()** is like Debug or Display, but for branches it pretty-prints both the node and its descendents
     fn desc(&self, indent: isize) -> String;
-    // looks for a single match, does not care about repeats
+    /// Checks a string to see if its head matches the contents of this node
     fn matches(&self, string: &str) -> bool { string.is_empty() }
+    // gets the limits for a node - for instance, if the node is followed by a '+' the limits are (1, EFFECTIVELY_INFINITE)
     fn limits(&self) -> Limits;
 }
 
-// CharsNode keeps a string of consecuive characters to look for. Really, it is like an AndNode where each node has a single
-// character, but that seems wasteful/ he sring contains no special chars, and it can have no repeat count unless there is
-// only a single character.
 impl TreeNode for CharsNode {
     fn desc(&self, indent: isize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits().simple_display()) }
     fn matches(&self, string: &str) -> bool { string.starts_with(&self.string) }
@@ -457,8 +478,8 @@ impl SetNode {
         format!("[{}{}]", if self.not {"^"} else {""}, self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join(""))
     }
 }    
-// used to mark ranges for SetNode
 // TODO: maybe combine single chars into String so can use contains() to ge all at once?
+/// Used to represent the characters in a SET (represented in the RE by "[a-mxyz]" or "[^\da-g]"
 #[derive(Debug,PartialEq)]
 enum Set {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
 
@@ -515,6 +536,30 @@ impl Set {
 //
 //////////////////////////////////////////////////////////////////
 
+/// Main entry point for parsing tree
+///
+/// This prepares the string for processing by making a Peekable object to control the input string. It effectively
+/// wraps the whole RE in a \(...\) construct to make a single entry point to the tree.
+pub fn parse_tree(input: &str) -> Result<Node, Error> {
+    trace_set_indent(0);
+    // wrap the string in "\(...\)" to make it an implicit AND node
+    let anchor_front = input.starts_with('^');
+    let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
+    chars.push('\\');
+    chars.push(')');
+    let mut outer_and = AndNode::parse_node(&mut chars)?;
+    if anchor_front {
+        let and_node = outer_and.mut_and_ref();
+        and_node.anchor = true;
+    }
+    match chars.next() {
+        Some(_) => Err(Error::make(5, "Extra characters after parse completed")),
+        None => Ok(outer_and),
+    }
+}
+
+/// main controller for the tree parse processing, it looks at the next few characters in the pipeline, decides what they are, and
+/// distributes them to the proper XNode constructor function
 fn parse(chars: &mut Peekable) -> Result<Node, Error> {
     let (ch0, ch1) = chars.peek_2();
     if ch0.is_none() { return Ok(Node::None); }
@@ -537,28 +582,8 @@ fn parse(chars: &mut Peekable) -> Result<Node, Error> {
     else { CharsNode::parse_node(chars) }
 }
 
-//
-// Main entry point for parsing tree
-//
-// Wraps the in put with "\(...\)" so it becomes an AND node, and sticks the SUCCESS node on the end when done
-pub fn parse_tree(input: &str) -> Result<Node, Error> {
-    trace_set_indent(0);
-    // wrap the string in "\(...\)" to make it an implicit AND node
-    let anchor_front = input.starts_with('^');
-    let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
-    chars.push('\\');
-    chars.push(')');
-    let mut outer_and = AndNode::parse_node(&mut chars)?;
-    if anchor_front {
-        let and_node = outer_and.mut_and_ref();
-        and_node.anchor = true;
-    }
-    match chars.next() {
-        Some(_) => Err(Error::make(5, "Extra characters after parse completed")),
-        None => Ok(outer_and),
-    }
-}
-
+/// This is the entrypoint to the phase 2, (tree walk) processing. It is put in this package to make it easier available, since loically it is
+/// part of the regexp search functionality.
 pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path<'a>, usize, usize)>, Error> {
     trace_set_indent(0);
     let mut start = text;
@@ -603,7 +628,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
 //
 //////////////////////////////////////////////////////////////////
 
-// gets the number of bytes in a sring of unicode characters
+/// gets the number of bytes in a sring of unicode characters
 fn char_bytes(string: &str, char_count: usize) -> usize {
     let s: String = string.chars().take(char_count).collect();
     s.len()
@@ -613,9 +638,9 @@ fn char_bytes(string: &str, char_count: usize) -> usize {
 //
 // LIMITS
 //
-// Used to handle the number of reps allowed for a Node. Besides holding the min, max, and lazy data,
-// it also handles other related questions, like whether a node falls in the allowed range, or how
-// far the initial walk should go
+/// Used to handle the number of reps allowed for a Node. Besides holding the min, max, and lazy data,
+/// it also handles other related questions, like whether a node falls in the allowed range, or how
+/// far the initial walk should go
 //
 //////////////////////////////////////////////////////////////////
 #[derive(Debug,Clone,Copy,PartialEq)] 
@@ -630,8 +655,11 @@ impl Default for Limits {
 }
 
 impl Limits {
+    /// Display every Limit in a *{min, max}* format for debugging
     fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"L"} else {""})}
 
+    /// parses a limit out of the RE string. This is called after every node is processed to see if
+    ///there is some repetition instruction (*, +, etc.) following it.
     fn parse(chars: &mut Peekable) -> Result<Limits, Error> {
         let next = chars.next();
         if next.is_none() { return Ok(Limits::default()); }
@@ -649,6 +677,7 @@ impl Limits {
         Ok(Limits{min, max, lazy})
     }
 
+    /// helper function to parse an int at the current position of the RE being parsed
     fn parse_ints(chars: &mut Peekable) -> Result<(usize, usize), Error> {
         let num = read_int(chars);
         let peek = chars.next();
@@ -667,27 +696,28 @@ impl Limits {
         }
     }
 
-    // Checks if the size falls in the range.
-    // Returns: <0 if NUM is < min; 0 if NUM is in the range min <= NUM <= ,ax (but SEE WARNING BELOW: NUM needs
-    // to be adjusted to account for the 0-match possibility.
-    //
-    // Beware: the input is usize and is in general the length of steps vector.
-    // This has a 0-match in its first position, so the value entered is actually one higher than the allowed value.
-    // I considered subtracting 1 from the number to make it match, but because the arg is usize and is sometimes 0
-    // it is better to leave it like this.
+    /// Checks if the size falls in the range.
+    /// Returns: <0 if NUM is < min; 0 if NUM is in the range min <= NUM <= ,ax (but SEE WARNING BELOW: NUM needs
+    /// to be adjusted to account for the 0-match possibility.
+    ///
+    /// Beware: the input is usize and is in general the length of steps vector.
+    /// This has a 0-match in its first position, so the value entered is actually one higher than the allowed value.
+    /// I considered subtracting 1 from the number to make it match, but because the arg is usize and is sometimes 0
+    /// it is better to leave it like this.
     pub fn check(&self, num: usize) -> isize {
         if num <= self.min { -1 }
         else if num <= self.max + 1 { 0 }
         else { 1 }
     }
 
-    // gives the length of the initial walk: MAX for greedy, MIN for lazy
+    /// gives the length of the initial walk: MAX for greedy, MIN for lazy
     pub fn initial_walk_limit(&self) -> usize { if self.lazy {self.min} else { self.max}}
 }
 //
 // These functions parse the reps option from the re source
 //
 
+/// reads an int from input, consuming characters if one is there, otherwise not changing anything
 fn read_int(chars: &mut Peekable) -> Option<usize> {
     let mut num: usize = 0;
     let mut any = false;
@@ -707,33 +737,42 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
 
 //////////////////////////////////////////////////////////////////
 //
-// Peekable
-//
-// This is an iterator with added features to make linear parsing of the regexp string easier:
-//     1) peeking: the next char can be peeked (read without consuming) or returned after being consumed
-//     2) extra characters can be added to the stream at the end of the buffer (without copying the entire string)
-//
-// It also has progress(), a sanity check to catch suspicious behavior, like infinite loops or overuse of peeking
+/// Peekable
+///
+/// This is an iterator with added features to make linear parsing of the regexp string easier:
+///     1) peeking: the next char can be peeked (read without consuming) or returned after being consumed
+///     2) extra characters can be added to the stream at the end of the buffer (without copying the entire string)
+///
+/// It also has progress(), a sanity check to catch suspicious behavior, like infinite loops or overuse of peeking
 //
 //////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
 struct Peekable<'a> {
+    /// The char iterator sourcing the chars
     chars: Chars<'a>,
+    /// a vector holding characters taken off of *chars* but not consumed. Requests to **next()** grab input from here before looking in **chars**.
     peeked: Vec<char>,
+    /// A vector holding chars appended to the end of the input string. This is only accessed after the **chars** iterator has been exhausted.
     trailer: Vec<char>,
+    /// To minimize the chance of infinite loops this is inc'ed whenever a char is read. This way if no progress is made in processing the RE
+    /// string a warning can be sent. I worry there could be some bad syntax that causes an infinite loop, this should cach such a happening.
     progress_check: isize,
 }
 
 impl<'a> Peekable<'a> {
+    /// sanity check: if peeked stack exceeds this size it is probably a problem
+    const PEEKED_SANITY_SIZE: usize = 20;
+    /// create a new **Peekable** to source a string
     fn new(string: &str) -> Peekable { Peekable { chars: string.chars(), peeked: Vec::<char>::new(), trailer: Vec::<char>::new(), progress_check: 1} }
 
+    /// gets the next char from the **Peekable** stream - first checks **peeked**, then **chars**, finally **trailer**
     pub fn next(&mut self) -> Option<char> {
         if !self.peeked.is_empty() { Some(self.peeked.remove(0)) }
         else { self.next_i() }
     }
 
-    // peek() looks at the next character in the pipeline. If called multiple times it returns the same value
+    /// peek() looks at the next character in the pipeline. If called multiple times it returns the same value
     pub fn peek(&mut self) -> Option<char> {
         if self.peeked.is_empty() {
             let ch = self.next_i()?;
@@ -742,7 +781,7 @@ impl<'a> Peekable<'a> {
         Some(self.peeked[0])
     }
 
-    // peek at the next n chars
+    /// peek at the next n chars
     pub fn peek_n(&mut self, n: usize) -> Vec<Option<char>> {
         let mut ret: Vec<Option<char>> = Vec::new();
         for ch in self.peeked.iter() {
@@ -753,29 +792,31 @@ impl<'a> Peekable<'a> {
         ret
     }
 
-    // convenient because 2 chars is all the lookahead I usually need
+    /// convenient because 2 chars is all the lookahead I usually need
     pub fn peek_2(&mut self) -> (Option<char>, Option<char>) {
         let x = self.peek_n(2);
         (x[0], x[1])
     }
 
 
-    // This simply adds the char back in the queue. It is assumed the caller returns the chars in the reverse order they are popped off
+    /// This simply adds the char back in the queue. It is assumed the caller returns the chars in the reverse order they are popped off
     pub fn put_back(&mut self, ch: char) {
         self.progress_check -= 1;
         self.peeked.insert(0, ch);
     }
-    
+
+    /// pushed a char onto the back of the **Peekable** stream
     pub fn push(&mut self, ch: char) { self.trailer.push(ch); }
 
 
-    // simple to do, and maybe useful for early stages: make sure the parse loop can't get through without burning at least one character
+    /// simple to do, and maybe useful for early stages: make sure the parse loop can't get through without burning at least one character
     fn progress(&mut self) {
         if self.progress_check <= 0 {panic!("Looks like no progress is being made in parsing string"); }
-        if self.peeked.len() > PEEKED_SANITY_SIZE { panic!("PEEKED stack has grown to size {}", self.peeked.len()); }
+        if self.peeked.len() > Peekable::PEEKED_SANITY_SIZE { panic!("PEEKED stack has grown to size {}", self.peeked.len()); }
         self.progress_check = 0;
     }
-    
+
+    /// **next_internal()**, fetches the next char from the iterator, or the trailer if the iterator is exhausted
     fn next_i(&mut self) -> Option<char> {
         let mut ret = self.chars.next();
         if ret.is_none() {
@@ -785,7 +826,7 @@ impl<'a> Peekable<'a> {
         ret
     }
             
-    // peek_next() gets the next unread character, adds it to the peeked list, and returns it
+    /// peek_next() gets the next unread character, adds it to the peeked list, and returns it
     fn peek_next(&mut self) -> Option<char> {
         let ch = self.next_i();
         if let Some(c) = ch { self.peeked.push(c); }
@@ -793,6 +834,7 @@ impl<'a> Peekable<'a> {
     }
 }
 
+/// simple struct used to provide control on how errors are displayed
 #[derive(Debug)]
 pub struct Error {
     pub msg: String,
@@ -800,6 +842,7 @@ pub struct Error {
 }
 
 impl Error {
+    /// constructor
     fn make(code: usize, msg: &str,) -> Error { Error{code, msg: msg.to_string()}}
 }
 
@@ -814,25 +857,34 @@ impl core::fmt::Display for Error {
 //
 // Report
 //
-// Used to deliver the results to the caller, a tree of results
+/// Used to deliver the search results to the caller. Results form a tree, AndNode and OrNode are branches, the other
+/// Nodes are leaves. **Report** is built up from the successful **Path** that walked the entire tree.
 //
 //////////////////////////////////////////////////////////////////
 
 #[derive(Debug,Clone)]
 pub struct Report {
+    /// The string found matching the RE pattern
     pub found: String,
-    pos: (usize, usize),
-    bytes: (usize, usize),
-    name: Option<String>,
+    /// The position in chars of the string. This cannot be used for slices, except for ASCII chars. To get a slice use **pos**
+    pub pos: (usize, usize),
+    /// The position in bytes of the string: that is, found[pos.0..pos.1] is a valid unicode substring containing the match
+    pub bytes: (usize, usize),
+    /// The name of the field: if None then the field should not be included in the Report tree, if Some("") it is included but
+    /// unnamed, otherwise it is recorded with the given name
+    pub name: Option<String>,
+    /// Array of child Report structs, only non-empty for And and Or nodes. OrNodes will have only a single child node, AndNodes can have many.
     pub subreports: Vec<Report>,
 }
 
 impl Report {
+    /// Constructor: creates a new report from a successful Path
     pub fn new(root: &crate::regexp::walk::Path, char_start: usize, byte_start: usize) -> Report {
         let (reports, _char_end)  = root.gather_reports(char_start, byte_start);
         reports[0].clone()
     }
     
+    /// Pretty-prints a report with indentation to help make it easier to read
     pub fn display(&self, indent: isize) {
         let name_str = { if let Some(name) = &self.name { format!("<{}>", name) } else { "".to_string() }};
         println!("{}\"{}\" char position [{}, {}] byte position [{}, {}] {}",
@@ -840,6 +892,8 @@ impl Report {
         self.subreports.iter().for_each(move |r| r.display(indent + 1));
     }
 
+    /// Gets **Report** nodes representing matches for named Nodes. The return is a *Vec* because named matches can occur multiple
+    /// times - for example, _\?\<name\>abc\)*_
     pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<&Report> {
         let mut v = Vec::<&Report>::new();
         if let Some(n) = &self.name {
@@ -852,11 +906,13 @@ impl Report {
         v
     }
 
+    /// Gets a hash of  **Report** nodes grouped by name. This just sets things up and calls **get_named_internal()** to do the work
     pub fn get_named(& self) -> HashMap<&str, Vec<&Report>> {
         let hash = HashMap::new();
         self.get_named_internal(hash)
     }
-    
+
+    /// internal function that does the work for **get_named()**
     fn get_named_internal<'b>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report>>) -> HashMap<&'b str, Vec<&Report>> {
         if let Some(name) = &self.name {
             if let Some(mut_v) = hash.get_mut(&name.as_str()) {
