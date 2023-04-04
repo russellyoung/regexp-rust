@@ -430,10 +430,6 @@ impl OrNode {
         }
         Ok(Node::Or(OrNode {nodes, lims: Limits {min: 0, max: 0, lazy: false}}).trace())
     }
-    fn fix_limits(&mut self) {
-        let max = self.nodes.len() - 1;
-        self.lims = Limits {min: 0, max, lazy: false};
-    }
 }
 
 impl SetNode {

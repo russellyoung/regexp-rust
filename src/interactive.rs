@@ -87,7 +87,7 @@ impl Interactive {
         let mut res = Vec::<String>::new();
         if !config.re.is_empty() { res.push(config.re.to_string()); }
         let mut texts = Vec::<String>::new();
-        if !config.text.is_empty() { texts.push(config.text.to_string()); }
+        if !config.text.is_empty() { texts.push(config.text); }
         Interactive { res,
                       texts,
 //                      tree: Node::None,

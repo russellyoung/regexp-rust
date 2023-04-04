@@ -85,6 +85,8 @@ pub struct OrStep<'a> {
 pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Set(Vec<SetStep<'a>>), And(Vec<AndStep<'a>>), Or(OrStep<'a>), None }
 
 impl<'a> Path<'a> {
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
+    
     /// length of the **Path** (the number of **Step**s it has)
     pub fn len(&self) -> usize {
         match self {
