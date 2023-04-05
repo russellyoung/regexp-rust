@@ -20,7 +20,7 @@
 //!  - **ranges**: matches characters in the given set
 //!    - **[abx-z]** matches any character in the brackets. Ranges are supported, so the previous range matches any of a, b, x, y, z
 //!  - **not ranges** matches on characters not in the given set
-//!    - **[^ab]**: matches any character not in the brackets. Ranges are supported, so [^abx-z] matches any character but a, b, x, y, z
+//!    - **\[^abx-z\]**: matches any character not in the brackets. Ranges are supported, so [^abx-z] matches any character but a, b, x, y, z
 //!  - **and groups**
 //!    - **\(...\)**: takes everything inside the escaped parens as a sub-regular expression. And groups can show up in the result optionally identified by a name or not, or can be hidden from the results
 //!    - **\(?...\)**: a hidden group, it will not be recorded in the search results
@@ -51,7 +51,9 @@
 //!         Err(error) => { return Err(error); },
 //!     };
 //!     match regexp::walk_tree(&tree, text) {
-//!         Ok(Some((path, char_start, bytes_start))) => { return Ok(Some(Report::new(&path, char_start, bytes_start).display(0))) },
+//!         Ok(Some((path, char_start, bytes_start))) => {
+//!             return Ok(Some(Report::new(&path, char_start, bytes_start).display(0)))
+//!         },
 //!         Ok(None) => return Ok(None),
 //!         Err(error) => Err(error),
 //!     }
@@ -83,16 +85,16 @@ const TAB_SIZE:isize = 4;
 static mut TRACE_LEVEL: u32 = 0;
 fn set_trace(level: u32) { unsafe { TRACE_LEVEL = level }}
 /// **trace()** is used to control output of debug information, and also to view steps in the walk phase. It uses a static mut value in order to be available everywhere. 
-pub fn trace(level: u32) -> bool { unsafe { level <= TRACE_LEVEL }}
+pub(crate) fn trace(level: u32) -> bool { unsafe { level <= TRACE_LEVEL }}
 
 static mut TRACE_INDENT:isize = 0;
 
 /// **trace_change_indent()** is used to increase or decrease the current trace indent level
-pub fn trace_change_indent(delta: isize) { unsafe { TRACE_INDENT += delta; } }
+pub(crate) fn trace_change_indent(delta: isize) { unsafe { TRACE_INDENT += delta; } }
 /// **trace_set_indent()** is used to reset the indent level to a desired value, usually 0
-pub fn trace_set_indent(size: isize) { unsafe { TRACE_INDENT = size; } }
+pub(crate) fn trace_set_indent(size: isize) { unsafe { TRACE_INDENT = size; } }
 /// ** trace_indent()** gets the number of spaces to use as prefix to trace output
-pub fn trace_indent() -> String { unsafe { pad(TRACE_INDENT) }}
+pub(crate) fn trace_indent() -> String { unsafe { pad(TRACE_INDENT) }}
 
 /// A helper function to format debug. It provides strings of spaces to format output dynamically.
 /// An indent level consists of the number of spaces given by TAB_SIZE,

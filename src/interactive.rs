@@ -21,8 +21,8 @@ use std::collections::HashMap;
 
 const PROMPT: &str = "> ";
 
-/// THe structure used to run an interactive session
-pub struct Interactive {
+/// The structure used to run an interactive session
+pub(crate) struct Interactive {
     /// the list of regular expressions, last one is the current value
     res: Vec<String>,
     /// the list of target strings, last one is the current value
@@ -34,13 +34,14 @@ pub struct Interactive {
     prompt_str: String,
 }
 
-/// a RE used to parse the command line each time it is entered. It gets named matches:
-///  - cmd: the first word
-///  - subcmd: the second word, if alphabetic
-///  - num: the second word, if numeric
-///  - body: everything after the first word
-///  - tail:  everything after the secondword
-///  - all: the whole command, trimmed
+/// a RE used to parse the command line each time it is entered.
+// It gets named matches:
+//  - cmd: the first word
+//  - subcmd: the second word, if alphabetic
+//  - num: the second word, if numeric
+//  - body: everything after the first word
+//  - tail:  everything after the secondword
+//  - all: the whole command, trimmed
 
 const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtsfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)\|$ *\(?<tail>.*\)\)?\)";
 
@@ -95,7 +96,7 @@ fn get_command(cmd: &str) -> &str {
     
 impl Interactive {
     /// constructor for the session object
-    pub fn new(config: Config) -> Interactive {
+    pub(crate) fn new(config: Config) -> Interactive {
         let mut res = Vec::<String>::new();
         if !config.re.is_empty() { res.push(config.re.to_string()); }
         let mut texts = Vec::<String>::new();
@@ -114,7 +115,7 @@ impl Interactive {
     fn text(&self) -> Option<&str> { if self.texts.is_empty() { None } else { Some(self.texts[self.texts.len() - 1].as_str()) }}
 
     /// starts up the interactive session
-    pub fn run(&mut self) {
+    pub(crate) fn run(&mut self) {
         let stdin = io::stdin();
         let mut buffer;
         loop {
