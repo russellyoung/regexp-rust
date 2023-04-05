@@ -354,6 +354,9 @@ fn reports() {
     assert!(second.len() == 2);
     check_report(&second[0], "ef", (5, 7), (5, 7), 0);
     check_report(&second[1], "ef", (7, 9), (7, 9), 0);
+    let zeroth = report.get_by_name("");
+    check_report(&zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
+    assert!(report.get_by_name("fake").is_empty());
     // all names
     let all = report.get_named();
     let zeroth = all.get("").unwrap();
