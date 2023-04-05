@@ -550,7 +550,7 @@ pub fn parse_tree(input: &str) -> Result<Node, Error> {
         let and_node = outer_and.mut_and_ref();
         and_node.anchor = true;
     }
-    if let Some(_) = chars.next() { Err(Error::make(5, "Extra characters after parse completed")) }
+    if chars.next().is_some() { Err(Error::make(5, "Extra characters after parse completed")) }
     else { Ok(outer_and) }
 }
 

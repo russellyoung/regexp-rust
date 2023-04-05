@@ -386,8 +386,8 @@ impl<'a> SetStep<'a> {
     /// try to take a single step over a set of characters
     fn step(&self) -> Option<SetStep<'a>> {
         let string = &self.string[self.match_len..];
-        if self.node.matches(string) { Some(SetStep {node: self.node, string, match_len: char_bytes(string, 1)}) } else
-        { None }
+        if self.node.matches(string) { Some(SetStep {node: self.node, string, match_len: char_bytes(string, 1)}) }
+        else { None }
     }
 }
 

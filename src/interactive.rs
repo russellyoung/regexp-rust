@@ -42,7 +42,7 @@ pub struct Interactive {
 ///  - tail:  everything after the secondword
 ///  - all: the whole command, trimmed
 
-const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtsfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)[^0-9]\|$ *\(?<tail>.*\)\)?\)";
+const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtsfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)\|$ *\(?<tail>.*\)\)?\)";
 
 /// help text to display
 const HELP_TEXT: &str = r"
@@ -125,7 +125,7 @@ impl Interactive {
                 Ok(1) => (),
                 Ok(_x) => {
                     let  _ = buffer.pop();    // pop off trailing CR
-                    if !self.do_command(&buffer) {break; }
+                    if !self.find_command(&buffer) {break; }
                 },
                 Err(_msg) => { break;},
             }
@@ -150,7 +150,7 @@ impl Interactive {
     }
 
     /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
-    fn do_command(&mut self, input: &str) -> bool{
+    fn find_command(&mut self, input: &str) -> bool{
         let walk = walk_tree(&self.cmd_parse_tree, input);
         if let Ok(Some((path, _, _))) = &walk {
             let report = Report::new(path, 0, 0);

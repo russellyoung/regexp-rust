@@ -5,6 +5,34 @@ use crate::regexp::*;
 // make sure that the parsing basically works.
 //
 
+#[test]
+fn peekable() {
+    let mut chars = Peekable::new("abcde");
+    chars.push('z');
+    assert_eq!(Some('a'), chars.next());
+    assert_eq!(Some('b'), chars.peek());
+    assert_eq!(Some('b'), chars.peek());
+    assert_eq!(Some('b'), chars.next());
+    assert_eq!(Some('c'), chars.peek());
+    chars.put_back('x');
+    assert_eq!(Some('x'), chars.peek());
+    assert_eq!(Some('x'), chars.next());
+    assert_eq!(Some('c'), chars.next());
+    assert_eq!((Some('d'), Some('e')), chars.peek_2());
+    let peek_4 = chars.peek_n(4);
+    assert!(peek_4.len() == 4
+            && Some('d') == peek_4[0]
+            && Some('e') == peek_4[1]
+            && Some('z') == peek_4[2]
+            && None == peek_4[3]);
+    assert_eq!(Some('d'), chars.next());
+    assert_eq!(Some('e'), chars.next());
+    assert_eq!(Some('z'), chars.next());
+    assert_eq!(None, chars.next());
+    assert_eq!(None, chars.peek());
+    
+}
+
 fn make_chars_string(string: &'static str) -> Node {
         Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min: 1, max: 1, lazy: false}})
 }
@@ -157,9 +185,8 @@ fn set_basic() {
 
 fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
     let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let (path, start, b_start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("Expected \"{}\", didn't find anything", expected)).unwrap();
-    let report = crate::regexp::Report::new(&path, start, b_start);
-    assert_eq!(report.found, expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, report.found);
+    let (path, _, _) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("Expected \"{}\", didn't find anything", expected)).unwrap();
+    assert_eq!(path.matched_string(), expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, path.matched_string());
 }       
         
 fn not_find<'a>(re: &'a str, text: &'a str) {
@@ -273,6 +300,74 @@ fn lazy() {
     find(r"a\(bcd\)+bc", "abcdbcdbcd", "abcdbcdbc");
 }
 
+
+fn get_report<'a>(re: &'a str, text: &'a str, ) -> Report {
+    let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    let (path, start, b_start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap();
+    crate::regexp::Report::new(&path, start, b_start)
+}       
+fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (usize, usize), child_count: usize) {
+    assert_eq!(report.found, expected);
+    assert_eq!(report.pos, pos);
+    assert_eq!(report.bytes, bytes);
+    assert_eq!(report.subreports.len(), child_count);
+}
+
+// this could be more comprehensive, but regexp is not a real project
+#[test]
+fn reports() {
+    // basic
+    let report = get_report("asd", ".asd.");
+    check_report(&report, "asd", (1, 4), (1, 4), 0);
+    // basic, unicode
+    let report = get_report("你好", ".你好.");
+    check_report(&report, "你好", (1, 3), (1, 7), 0);
+    // simple AND
+    let report = get_report(r"ab\(cd\)ef", ".abcdef.");
+    check_report(&report, "abcdef", (1, 7), (1, 7), 1);
+    check_report(&report.subreports[0], "cd", (3, 5), (3, 5), 0);
+    // simple AND unicode
+    let report = get_report(r"ab\(你\)好ef", ".ab你好ef.");
+    check_report(&report, "ab你好ef", (1, 7), (1, 11), 1);
+    check_report(&report.subreports[0], "你", (3, 4), (3, 6), 0);
+    assert!(report.get_by_name("fred").is_empty());
+    // nested and with repetition
+    let report = get_report(r"ab\(cd\(ef\)+\)+", ".abcdefefcd.");
+    check_report(&report, "abcdefef", (1, 9), (1, 9), 1);
+    check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
+    check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
+    check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
+    // silent AND
+    let report = get_report(r"ab\(?cd\)ef", ".abcdef.");
+    check_report(&report, "abcdef", (1, 7), (1, 7), 0);
+    // named
+    let report = get_report(r"ab\(?<first>cd\(?<second>ef\)+\)+", ".abcdefefcd.");
+    check_report(&report, "abcdefef", (1, 9), (1, 9), 1);
+    check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
+    check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
+    check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
+    assert!(report.get_by_name("fred").is_empty());
+    let first = report.get_by_name("first");
+    assert!(first.len() == 1);
+    check_report(&first[0], "cdefef", (3, 9), (3, 9), 2);
+    let second = report.get_by_name("second");
+    assert!(second.len() == 2);
+    check_report(&second[0], "ef", (5, 7), (5, 7), 0);
+    check_report(&second[1], "ef", (7, 9), (7, 9), 0);
+    // all names
+    let all = report.get_named();
+    let zeroth = all.get("").unwrap();
+    check_report(&zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
+    let first = all.get("first").unwrap();
+    assert!(first.len() == 1);
+    check_report(&first[0], "cdefef", (3, 9), (3, 9), 2);
+    let second = all.get("second").unwrap();
+    assert!(second.len() == 2);
+    check_report(&second[0], "ef", (5, 7), (5, 7), 0);
+    check_report(&second[1], "ef", (7, 9), (7, 9), 0);
+    assert!(all.get("fake").is_none());
+}
+
 fn e_check(re: &str, ecode: usize) {
     match parse_tree(re) {
         Ok(_) => panic!("Expected error parsing \"{}\", didn't get it", re),
@@ -288,3 +383,4 @@ fn errors() {
     e_check(r"asd{as", 10);
     e_check(r"asd{4as", 12);
 }
+
