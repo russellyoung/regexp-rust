@@ -74,14 +74,15 @@ impl Node {
             Node::None           => None,
         }
     }
+
     // thank you rust-lang.org
-    /// method to recover a mutable **OrNode** from its ""Node::Or**. It is a programming error ro call this on any other type, if it is it panics.
-    fn mut_or_ref(&mut self)   -> &mut OrNode    { if let Node::Or(node)    = self { node } else { panic!("Trying for mut ref to OrNode from wrong Node type"); } }
-    /// method to recover a mutable **AndNode** from its ""Node::And**. It is a programming error ro call this on any other type, if it is it panics.
-    /// so it panics if called on anything but an **OrNode**
-    fn mut_and_ref(&mut self)  -> &mut AndNode   { if let Node::And(node)   = self { node } else { panic!("Trying for mut ref to AndNode from wrong Node type"); } }
-    /// method to recover a mutable **CharsNode** from its ""Node::Chars**. It is a programming error ro call this on any other type, if it is it panics.
-    fn mut_chars_ref(&mut self)-> &mut CharsNode { if let Node::Chars(node) = self { node } else { panic!("Trying for mut ref to CharsNode from wrong Node type"); } }
+    // / method to recover a mutable **OrNode** from its ""Node::Or**. It is a programming error ro call this on any other type, if it is it panics.
+    //fn mut_or_ref(&mut self)   -> &mut OrNode    { if let Node::Or(node)    = self { node } else { panic!("Trying for mut ref to OrNode from wrong Node type"); } }
+    // / method to recover a mutable **AndNode** from its ""Node::And**. It is a programming error ro call this on any other type, if it is it panics.
+    // / so it panics if called on anything but an **OrNode**
+//    fn mut_and_ref(&mut self)  -> &mut AndNode   { if let Node::And(node)   = self { node } else { panic!("Trying for mut ref to AndNode from wrong Node type"); } }
+    // / method to recover a mutable **CharsNode** from its ""Node::Chars**. It is a programming error ro call this on any other type, if it is it panics.
+//    fn mut_chars_ref(&mut self)-> &mut CharsNode { if let Node::Chars(node) = self { node } else { panic!("Trying for mut ref to CharsNode from wrong Node type"); } }
 
     //
     // Following are to handle special cases in building the tree. If I could redesign regexps they wouldn't be needed, but
@@ -105,7 +106,7 @@ impl Node {
         let prev_is_chars = matches!(&nodes[nodes.len() - 1], Node::Chars(_));
         if prev_is_chars {
             let mut prev = nodes.pop().unwrap();
-            let chars_node = prev.mut_chars_ref();
+            let chars_node = CharsNode::mut_from_node(&mut prev);
             if chars_node.string.len() > 1 {
                 let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), lims: Limits::default()});
                 nodes.push(prev);
@@ -122,21 +123,22 @@ impl Node {
     ///    first element in the OR list.
     ///  - In addition, if the preceding node is CHARS and its length is >1 it needs to be split, since the
     ///    OR only binds a single character
-    fn or_into_and(mut self, nodes: &mut Vec<Node>) {
-        if nodes.is_empty() { return; }
+    fn or_into_and(mut self, nodes: &mut Vec<Node>) -> Result<(), Error> {
+        if nodes.is_empty() { return Err(Error::make(9, "OR with no predecessor")); }
         Node::chars_before_or(nodes);
         let mut prev = nodes.pop().unwrap();
         if let Node::Or(_) = prev {
-            let mut prev_node = prev.mut_or_ref();
+            let mut prev_node = OrNode::mut_from_node(&mut prev);
             prev_node.push(self);
             prev_node.lims.max += 1;
             nodes.push(prev);
         } else {
-            let or_node = self.mut_or_ref();
+            let or_node = OrNode::mut_from_node(&mut self);
                 or_node.push_front(prev);
                 or_node.lims.max += 1;
                 nodes.push(self);
         }
+        Ok(())
     }
 
     /// Called on Node creation, so if the race level is 2 or higher a message is output on node creation
@@ -297,10 +299,6 @@ impl TreeNode for SetNode {
 
 
 impl CharsNode {
-    // These characters have meaning when escaped, break for them. Otherwise just delete the '/' from the string
-    // TODO: get the right codes
-    const ESCAPE_CODES: &str = "ntdula()|";
-
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("CHARS", chars); }
         let mut chs = Vec::<char>::new();
@@ -311,7 +309,7 @@ impl CharsNode {
                     if '$' == ch0 && chars.peek_n(4)[3].is_none() { break; }
                     if r".[".contains(ch0) { break; }
                     if ch0 == '\\' {
-                        if CharsNode::ESCAPE_CODES.contains(ch1) { break; }
+                        if SpecialCharNode::ESCAPE_CODES.contains(ch1) { break; }
                         let _ = chars.next();    // pop off the '/'
                     } else if "?*+{".contains(ch0) {  // it is a rep count - this cannot apply to a whole string, just a single character
                         if chs.len() > 1 {           // so return the previous character to the stream and register the rest
@@ -337,31 +335,43 @@ impl CharsNode {
                })
            }).trace())
     }
+    /// recovers a CharsNode from the Node::Chars enum
+    fn mut_from_node<'a>(node: &'a mut Node) -> &'a mut CharsNode {
+        if let Node::Chars(chars_node) = node { chars_node }
+        else { panic!("trying to get CharsNode from wrong type") }
+    }
 }    
 
 impl SpecialCharNode {
+    /// These characters have meaning when escaped, break for them. Otherwise just delete the '/' from the string
+    const ESCAPE_CODES: &str = "adntlu()|";
+
     // called with pointer at a special character. Char can be '.' or "\*". For now I'm assuming this only gets called with special
     // sequences at bat, so no checking is done.
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("SPECIAL", chars); }
-        let special = if let Some(ch) = chars.next() {
-            // single character special chars. All the others start with '\'
-            if ".$".contains(ch) { ch }
-            else if let Some(_ch1) = chars.peek() { chars.next().unwrap() }   // ch1 is next(), doing it this way gets the same value and pops it off
-            else { return Ok(Node::None); }
-        } else { return Ok(Node::None); };
+        let special = match chars.peek_2() {
+            (Some('$'), _) | (Some('.'), _) => chars.next().unwrap(),
+            (Some('\\'), Some(ch)) => {
+                let _ = chars.next();       // parse out '\'
+                if SpecialCharNode::ESCAPE_CODES.contains(ch) {chars.next().unwrap()}
+                    // error return? ("undefined escape character")
+                else { return Ok(Node::None); }
+            },
+            _ => { return Ok(Node::None); }
+        };
         Ok(Node::SpecialChar(SpecialCharNode { special, lims: Limits::parse(chars)?}).trace())
     }
 
     fn match_char(&self, ch: char) -> bool {
         match self.special {
             '.' => true,                        // all
-            'd' => ('0'..='9').contains(&ch),   // numeric
-            'l' => ('a'..='z').contains(&ch),   // lc ascii
-            'u' => ('A'..='Z').contains(&ch),   // uc ascii
             'a' => (' '..='~').contains(&ch),   // ascii printable
+            'd' => ('0'..='9').contains(&ch),   // numeric
             'n' => ch == '\n',                  // newline
+            'l' => ('a'..='z').contains(&ch),   // lc ascii
             't' => ch == '\t',                  // tab
+            'u' => ('A'..='Z').contains(&ch),   // uc ascii
             _ => false
         }
     }
@@ -381,7 +391,7 @@ impl AndNode {
             let node = parse(chars)?;
             match node {
                 Node::None => (),
-                Node::Or(_) => node.or_into_and(&mut nodes),
+                Node::Or(_) => { let _ = node.or_into_and(&mut nodes)?;},
                 _ => nodes.push(node),
             }
         }
@@ -416,6 +426,11 @@ impl AndNode {
             _ => Ok(Some("".to_string())),
         }
     }
+    /// recovers an AndNode from the Node::And enum
+    fn mut_from_node<'a>(node: &'a mut Node) -> &'a mut AndNode {
+        if let Node::And(and_node) = node { and_node }
+        else { panic!("trying to get AndNode from wrong type") }
+    }
 }
 
 impl OrNode {
@@ -431,6 +446,11 @@ impl OrNode {
             nodes.push(node);
         }
         Ok(Node::Or(OrNode {nodes, lims: Limits {min: 0, max: 0, lazy: false}}).trace())
+    }
+    /// recovers an OrNode from the Node::Ar enum
+    fn mut_from_node<'a>(node: &'a mut Node) -> &'a mut OrNode {
+        if let Node::Or(or_node) = node { or_node }
+        else { panic!("trying to get OrNode from wrong type") }
     }
 }
 
@@ -547,7 +567,7 @@ pub fn parse_tree(input: &str) -> Result<Node, Error> {
     chars.push(')');
     let mut outer_and = AndNode::parse_node(&mut chars)?;
     if anchor_front {
-        let and_node = outer_and.mut_and_ref();
+        let and_node = AndNode::mut_from_node(&mut outer_and);
         and_node.anchor = true;
     }
     if chars.next().is_some() { Err(Error::make(5, "Extra characters after parse completed")) }
@@ -730,6 +750,81 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
 
 //////////////////////////////////////////////////////////////////
 //
+// Report
+//
+/// Used to deliver the search results to the caller. Results form a tree, AndNode and OrNode are branches, the other
+/// Nodes are leaves. **Report** is built up from the successful **Path** that walked the entire tree.
+//
+//////////////////////////////////////////////////////////////////
+
+#[derive(Debug,Clone)]
+pub struct Report {
+    /// The string found matching the RE pattern
+    pub found: String,
+    /// The position in chars of the string. This cannot be used for slices, except for ASCII chars. To get a slice use **pos**
+    pub pos: (usize, usize),
+    /// The position in bytes of the string: that is, found[pos.0..pos.1] is a valid unicode substring containing the match
+    pub bytes: (usize, usize),
+    /// The name of the field: if None then the field should not be included in the Report tree, if Some("") it is included but
+    /// unnamed, otherwise it is recorded with the given name
+    pub name: Option<String>,
+    /// Array of child Report structs, only non-empty for And and Or nodes. OrNodes will have only a single child node, AndNodes can have many.
+    pub subreports: Vec<Report>,
+}
+
+impl Report {
+    /// Constructor: creates a new report from a successful Path
+    pub fn new(root: &crate::regexp::walk::Path, char_start: usize, byte_start: usize) -> Report {
+        let (reports, _char_end)  = root.gather_reports(char_start, byte_start);
+        reports[0].clone()
+    }
+    
+    /// Pretty-prints a report with indentation to help make it easier to read
+    pub fn display(&self, indent: isize) {
+        let name_str = { if let Some(name) = &self.name { format!("<{}>", name) } else { "".to_string() }};
+        println!("{}\"{}\" char position [{}, {}] byte position [{}, {}] {}",
+                 pad(indent), self.found, self.pos.0, self.pos.1, self.bytes.0, self.bytes.1, name_str);
+        self.subreports.iter().for_each(move |r| r.display(indent + 1));
+    }
+
+    /// Gets **Report** nodes representing matches for named Nodes. The return is a *Vec* because named matches can occur multiple
+    /// times - for example, _\?\<name\>abc\)*_
+    pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<&Report> {
+        let mut v = Vec::<&Report>::new();
+        if let Some(n) = &self.name {
+            if n == name { v.push(self); }
+        }
+        for r in &self.subreports {
+            let mut x = r.get_by_name(name);
+            v.append(&mut x);
+        }
+        v
+    }
+
+    /// Gets a hash of  **Report** nodes grouped by name. This just sets things up and calls **get_named_internal()** to do the work
+    pub fn get_named(& self) -> HashMap<&str, Vec<&Report>> {
+        let hash = HashMap::new();
+        self.get_named_internal(hash)
+    }
+
+    /// internal function that does the work for **get_named()**
+    fn get_named_internal<'b>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report>>) -> HashMap<&'b str, Vec<&Report>> {
+        if let Some(name) = &self.name {
+            if let Some(mut_v) = hash.get_mut(&name.as_str()) {
+                mut_v.push(self);
+            } else {
+                hash.insert(name.as_str(), vec![self]);
+            }
+            for r in self.subreports.iter() {
+                hash = r.get_named_internal(hash);
+            }
+        }
+        hash
+    }
+}
+
+//////////////////////////////////////////////////////////////////
+//
 /// Peekable
 ///
 /// This is an iterator with added features to make linear parsing of the regexp string easier:
@@ -843,80 +938,5 @@ impl core::fmt::Display for Error {
     // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "Error:{}: {}", self.code, self.msg)
-    }
-}
-
-//////////////////////////////////////////////////////////////////
-//
-// Report
-//
-/// Used to deliver the search results to the caller. Results form a tree, AndNode and OrNode are branches, the other
-/// Nodes are leaves. **Report** is built up from the successful **Path** that walked the entire tree.
-//
-//////////////////////////////////////////////////////////////////
-
-#[derive(Debug,Clone)]
-pub struct Report {
-    /// The string found matching the RE pattern
-    pub found: String,
-    /// The position in chars of the string. This cannot be used for slices, except for ASCII chars. To get a slice use **pos**
-    pub pos: (usize, usize),
-    /// The position in bytes of the string: that is, found[pos.0..pos.1] is a valid unicode substring containing the match
-    pub bytes: (usize, usize),
-    /// The name of the field: if None then the field should not be included in the Report tree, if Some("") it is included but
-    /// unnamed, otherwise it is recorded with the given name
-    pub name: Option<String>,
-    /// Array of child Report structs, only non-empty for And and Or nodes. OrNodes will have only a single child node, AndNodes can have many.
-    pub subreports: Vec<Report>,
-}
-
-impl Report {
-    /// Constructor: creates a new report from a successful Path
-    pub fn new(root: &crate::regexp::walk::Path, char_start: usize, byte_start: usize) -> Report {
-        let (reports, _char_end)  = root.gather_reports(char_start, byte_start);
-        reports[0].clone()
-    }
-    
-    /// Pretty-prints a report with indentation to help make it easier to read
-    pub fn display(&self, indent: isize) {
-        let name_str = { if let Some(name) = &self.name { format!("<{}>", name) } else { "".to_string() }};
-        println!("{}\"{}\" char position [{}, {}] byte position [{}, {}] {}",
-                 pad(indent), self.found, self.pos.0, self.pos.1, self.bytes.0, self.bytes.1, name_str);
-        self.subreports.iter().for_each(move |r| r.display(indent + 1));
-    }
-
-    /// Gets **Report** nodes representing matches for named Nodes. The return is a *Vec* because named matches can occur multiple
-    /// times - for example, _\?\<name\>abc\)*_
-    pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<&Report> {
-        let mut v = Vec::<&Report>::new();
-        if let Some(n) = &self.name {
-            if n == name { v.push(self); }
-        }
-        for r in &self.subreports {
-            let mut x = r.get_by_name(name);
-            v.append(&mut x);
-        }
-        v
-    }
-
-    /// Gets a hash of  **Report** nodes grouped by name. This just sets things up and calls **get_named_internal()** to do the work
-    pub fn get_named(& self) -> HashMap<&str, Vec<&Report>> {
-        let hash = HashMap::new();
-        self.get_named_internal(hash)
-    }
-
-    /// internal function that does the work for **get_named()**
-    fn get_named_internal<'b>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report>>) -> HashMap<&'b str, Vec<&Report>> {
-        if let Some(name) = &self.name {
-            if let Some(mut_v) = hash.get_mut(&name.as_str()) {
-                mut_v.push(self);
-            } else {
-                hash.insert(name.as_str(), vec![self]);
-            }
-            for r in self.subreports.iter() {
-                hash = r.get_named_internal(hash);
-            }
-        }
-        hash
     }
 }

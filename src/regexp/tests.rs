@@ -33,6 +33,43 @@ fn peekable() {
     
 }
 
+//
+// test Limits: parse all modes, confirm check() works. Also kind of tests Peekable
+//
+#[test]
+fn limits_test() {
+    let limits_string = " ? * + {2} {3,5} {6,} ?? *? +? {2}? {3,5}? {6,}? ";
+    let data: [(usize, usize, bool); 13] = [(1, 1, false),
+                                            (0, 1, false),
+                                            (0, EFFECTIVELY_INFINITE, false),
+                                            (1, EFFECTIVELY_INFINITE, false),
+                                            (2, 2, false),
+                                            (3, 5, false),
+                                            (6, EFFECTIVELY_INFINITE, false),
+                                            (0, 1, true),
+                                            (0, EFFECTIVELY_INFINITE, true),
+                                            (1, EFFECTIVELY_INFINITE, true),
+                                            (2, 2, true),
+                                            (3, 5, true),
+                                            (6, EFFECTIVELY_INFINITE, true),
+    ];
+    let mut chars = Peekable::new(limits_string); 
+    for (min, max, lazy) in data {
+        if let Ok(limits) = Limits::parse(&mut chars) {
+            assert!(chars.next().unwrap() == ' ', "unexpected parse results");
+            assert!(limits.check(min) < 0, "< min check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.check(min + 1) == 0, "= min check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.check(max + 1) == 0, "= max check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.check(max + 2) > 0, "> max check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.lazy == lazy, "lazy check failed for ({}, {}, {})", min, max, lazy);
+        } else { panic!("failed parsing Limits"); }
+    }
+    assert!(chars.next() == None, "Failed to consume test string");
+}
+
+//
+// parser tests
+//
 fn make_chars_string(string: &'static str) -> Node {
         Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min: 1, max: 1, lazy: false}})
 }
@@ -72,39 +109,6 @@ impl Node {
     }
 }
 
-//
-// test Limits: parse all modes, confirm check() works. Also kind of tests Peekable
-//
-#[test]
-fn limits_test() {
-    let limits_string = " ? * + {2} {3,5} {6,} ?? *? +? {2}? {3,5}? {6,}? ";
-    let data: [(usize, usize, bool); 13] = [(1, 1, false),
-                                            (0, 1, false),
-                                            (0, EFFECTIVELY_INFINITE, false),
-                                            (1, EFFECTIVELY_INFINITE, false),
-                                            (2, 2, false),
-                                            (3, 5, false),
-                                            (6, EFFECTIVELY_INFINITE, false),
-                                            (0, 1, true),
-                                            (0, EFFECTIVELY_INFINITE, true),
-                                            (1, EFFECTIVELY_INFINITE, true),
-                                            (2, 2, true),
-                                            (3, 5, true),
-                                            (6, EFFECTIVELY_INFINITE, true),
-    ];
-    let mut chars = Peekable::new(limits_string); 
-    for (min, max, lazy) in data {
-        if let Ok(limits) = Limits::parse(&mut chars) {
-            assert!(chars.next().unwrap() == ' ', "unexpected parse results");
-            assert!(limits.check(min) < 0, "< min check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.check(min + 1) == 0, "= min check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.check(max + 1) == 0, "= max check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.check(max + 2) > 0, "> max check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.lazy == lazy, "lazy check failed for ({}, {}, {})", min, max, lazy);
-        } else { panic!("failed parsing Limits"); }
-    }
-    assert!(chars.next() == None, "Failed to consume test string");
-}
 //
 // parse tests
 //
@@ -161,7 +165,7 @@ fn or_with_chars_bug() {
     let mut or_node = make_or();
     or_node.push(make_chars_string("c"));
     or_node.push(make_chars_string("d"));
-    make_or_limits(or_node.mut_or_ref());
+    make_or_limits(OrNode::mut_from_node(&mut or_node));
     node.push(or_node);
     node.push(make_chars_string("ef"));
     assert_eq!(node, parse_tree(r"abc\|def").unwrap());
@@ -313,7 +317,11 @@ fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (us
     assert_eq!(report.subreports.len(), child_count);
 }
 
+//
+// Reports test
+//
 // this could be more comprehensive, but regexp is not a real project
+//
 #[test]
 fn reports() {
     // basic
@@ -371,6 +379,9 @@ fn reports() {
     assert!(all.get("fake").is_none());
 }
 
+//
+// error tests
+//
 fn e_check(re: &str, ecode: usize) {
     match parse_tree(re) {
         Ok(_) => panic!("Expected error parsing \"{}\", didn't get it", re),
@@ -383,6 +394,8 @@ fn errors() {
     e_check(r"abc\(de", 2);
     e_check(r"abc[de", 4);
     e_check(r"asd\)as", 5);
+    e_check(r"\(?<asd\)", 7);
+    e_check(r"\|sdf", 9);
     e_check(r"asd{as", 10);
     e_check(r"asd{4as", 12);
 }
