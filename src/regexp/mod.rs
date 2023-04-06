@@ -24,32 +24,34 @@ const EFFECTIVELY_INFINITE: usize = 99999999;
 //
 // Nodes act as a container to hold the TreeNodes that make up the tree. At first I used Box for everything but that
 // made it hard to keep track of what was what, eventually I thought if using enums as wrapper. That makes passing
-// things around conveneint, though it does require some way ofgetting back the TreeNode object. I've looked at
-// making all the Node types hold dyn TreeNode, which would make fetching them easier, but there still do seem to
-// be some places where I need to access the full object. It looks like a problem with using enums as Box is that
-// the size must be set at compile time and that cannot be done for traits
+// things around conveneint, though it does require some way of getting back the TreeNode object. At first I tried
+// making a trait to hold all the TreeNode structs, having all Node types hold 'dyn TreeNode' but it turned out in
+// this case not to be too useful - there were enough differences in the TreeNodes that it was not really natural
+// to generalize all the methods needed, or at least I could not see such good definitions, so instead common
+// functionality is provided through methods on the Node enum. ALso, using 'dyn TreeNode' did not seem to work
+// because I got error messages that the size was unknown at compile time. I don't know if I could have worked
+// aound this or not, but in any case it turned out using Node methods worked well.
 //
 // I also considered using a union for the contents - that is another way besides trait of having the same contents
-// type for everything. I think that would work well, but in the end I don't see a big advantage over using enums.
+// type for everything. I think that would work well, but in the end I don't see a big advantage over using enums,
+// and I get the feeling unions are not as much a mainstream feature. Also, they require using 'unsafe', which it
+// seems best to avoid whenever possible.
 //
 //////////////////////////////////////////////////////////////////
 
-/// Node acts as a common wrapper for the different XNode struct types: CharsNode, SpecialNode, SetNode, AndNode, and OrNode.
+/// Node acts as a common wrapper for the different XNode struct types: CharsNode, SpecialCharNode, SetNode, AndNode, and OrNode.
 /// Besides serving as a common strcut to distribute message requests, it also behaves like Box in providing a place in memory for the structures to live.
 #[derive(PartialEq)]
 pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(OrNode), Set(SetNode), None, }
 
 impl core::fmt::Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", if let Some(node) = self.tree_node() { node.desc(0) } else { "None".to_string() })
+//        write!(f, "{}", if let Some(node) = self.tree_node() { node.desc(0) } else { "None".to_string() })
+        write!(f, "{}", self.desc(0))
     }
 }
 
 impl Node {
-    /// checks whether the node is the special Node::None type, used to initialize structures and in case of errors. In general
-    /// if the code finds this it means an error condition
-    fn is_none(&self) -> bool { *self == Node::None }
-
     /// function that simply distributes a walk request to the proper XNode struct
     fn walk<'a>(&'a self, string: &'a str) -> walk::Path<'a> {
         match self {
@@ -62,27 +64,21 @@ impl Node {
         }
     }
 
-    /// Gets the node object from inside its enum wrapper as a TreeNode. This is currently of limited use, the code mayy be refactored to move more
-    /// functionality into the TreeNode trait.
-    fn tree_node(&self) -> Option<&dyn TreeNode> {
+    /// **desc()** is like Debug or Display, but for branches it pretty-prints both the node and its descendents
+    fn desc(&self, indent: isize) -> String {
         match self {
-            Node::Chars(a)       => Some(a),
-            Node::SpecialChar(a) => Some(a),
-            Node::And(a)         => Some(a),
-            Node::Or(a)          => Some(a),
-            Node::Set(a)         => Some(a),
-            Node::None           => None,
+            Node::Chars(a)       => a.desc(indent),
+            Node::SpecialChar(a) => a.desc(indent),
+            Node::And(a)         => a.desc(indent),
+            Node::Or(a)          => a.desc(indent),
+            Node::Set(a)         => a.desc(indent),
+            Node::None           => "None".to_string(),
         }
     }
-
-    // thank you rust-lang.org
-    // / method to recover a mutable **OrNode** from its ""Node::Or**. It is a programming error ro call this on any other type, if it is it panics.
-    //fn mut_or_ref(&mut self)   -> &mut OrNode    { if let Node::Or(node)    = self { node } else { panic!("Trying for mut ref to OrNode from wrong Node type"); } }
-    // / method to recover a mutable **AndNode** from its ""Node::And**. It is a programming error ro call this on any other type, if it is it panics.
-    // / so it panics if called on anything but an **OrNode**
-//    fn mut_and_ref(&mut self)  -> &mut AndNode   { if let Node::And(node)   = self { node } else { panic!("Trying for mut ref to AndNode from wrong Node type"); } }
-    // / method to recover a mutable **CharsNode** from its ""Node::Chars**. It is a programming error ro call this on any other type, if it is it panics.
-//    fn mut_chars_ref(&mut self)-> &mut CharsNode { if let Node::Chars(node) = self { node } else { panic!("Trying for mut ref to CharsNode from wrong Node type"); } }
+        
+    /// checks whether the node is the special Node::None type, used to initialize structures and in case of errors. In general
+    /// if the code finds this it means an error condition
+    fn is_none(&self) -> bool { *self == Node::None }
 
     //
     // Following are to handle special cases in building the tree. If I could redesign regexps they wouldn't be needed, but
@@ -108,7 +104,7 @@ impl Node {
             let mut prev = nodes.pop().unwrap();
             let chars_node = CharsNode::mut_from_node(&mut prev);
             if chars_node.string.len() > 1 {
-                let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), lims: Limits::default()});
+                let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), limits: Limits::default()});
                 nodes.push(prev);
                 nodes.push(new_node);
             } else {
@@ -130,12 +126,12 @@ impl Node {
         if let Node::Or(_) = prev {
             let mut prev_node = OrNode::mut_from_node(&mut prev);
             prev_node.push(self);
-            prev_node.lims.max += 1;
+            prev_node.limits.max += 1;
             nodes.push(prev);
         } else {
             let or_node = OrNode::mut_from_node(&mut self);
                 or_node.push_front(prev);
-                or_node.lims.max += 1;
+                or_node.limits.max += 1;
                 nodes.push(self);
         }
         Ok(())
@@ -165,28 +161,28 @@ fn trace_enter(name: &str, chars: &mut Peekable) {
 }
 
 //
-// Node structure definitions: these all implement TreeNode
+// Node struct subtypes: these are wrapped in the Node enum to make them easy to pass around
 //
 
 /// represents strings of regular characters that match themselves in the target string. This is a leaf node in the parse tree.
 /// Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
 #[derive(Default, Debug, PartialEq)]
 pub struct CharsNode {
-    lims: Limits,
+    limits: Limits,
     string: String,
 }
 
 /// handles matching special characters like ".", \d, etc. This is a leaf node in the parse tree.
 #[derive(Default, Debug, PartialEq)]
 pub struct SpecialCharNode {
-    lims: Limits,
+    limits: Limits,
     special: char,
 }
 
 /// handles AND (sequential) matches: this node represents a branch in the parse tree
 #[derive(Default, Debug, PartialEq)]
 pub struct AndNode {
-    lims: Limits,
+    limits: Limits,
     nodes: Vec<Node>,
     // NAMED == None means do not report, NAMED == "" means unnamed 
     named: Option<String>,
@@ -199,94 +195,16 @@ pub struct OrNode {
     nodes: Vec<Node>,
     /// Limits for OR nodes are different from other nodes. ORs cannot be repeated (except by enclosing them in
     /// an AND), so Limits is used for OR to move through the different branches rather than the different repetitions
-    lims: Limits,
+    limits: Limits,
 }
 
 /// handles [a-z] style matches. This node represents a branch in the parse tree
 #[derive(Default, PartialEq, Debug)]
 pub struct SetNode {
-    lims: Limits,
+    limits: Limits,
     targets: Vec<Set>,
     not: bool,
 }
-
-//////////////////////////////////////////////////////////////////
-//
-// The TreeNode trait
-//
-// This section defines the TreeNode trait and includes the Node implementations. Actually,
-// as it turned out, the TreeNode trait is not really useful. The first pass of the parser
-// did use it, but that was before using the Node enum as a wrapper. With that there is not
-// much gained by using the trait.
-//
-//////////////////////////////////////////////////////////////////
-
-/// TreeNode represents common methods among the Nodes. I may refactor the code in the future by adding more methods to make this more usefui.
-pub trait TreeNode {
-    /// **desc()** is like Debug or Display, but for branches it pretty-prints both the node and its descendents
-    fn desc(&self, indent: isize) -> String;
-    /// Checks a string to see if its head matches the contents of this node
-    fn matches(&self, string: &str) -> bool { string.is_empty() }
-    // gets the limits for a node - for instance, if the node is followed by a '+' the limits are (1, EFFECTIVELY_INFINITE)
-    fn limits(&self) -> Limits;
-}
-
-impl TreeNode for CharsNode {
-    fn desc(&self, indent: isize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits().simple_display()) }
-    fn matches(&self, string: &str) -> bool { string.starts_with(&self.string) }
-    fn limits(&self) -> Limits { self.lims }
-}
-
-impl TreeNode for SpecialCharNode {
-    fn desc(&self, indent: isize) -> String {
-        let slash = if ".$".contains(self.special) { "" } else { "\\" };
-        format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits().simple_display())
-    }
-
-    fn matches(&self, string: &str) -> bool {
-        match string.chars().next() {
-            Some(ch) => self.match_char(ch),
-            None => self.special == '$'    // match only end-of-string marker
-        }
-    }
-
-    fn limits(&self) -> Limits { self.lims }
-}
-
-    
-// format the limis for debugging
-impl TreeNode for AndNode {
-    fn desc(&self, indent: isize) -> String {
-        let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
-        let mut msg = format!("{}AndNode({}) {} {}", pad(indent), self.nodes.len(), self.limits().simple_display(), name);
-        for i in 0..self.nodes.len() {
-            let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
-            msg.push_str(format!("\n{}", disp_str).as_str());
-        }
-        msg
-    }
-    fn limits(&self) -> Limits { self.lims }
-}
-
-impl TreeNode for OrNode {
-    fn desc(&self, indent: isize) -> String {
-        let mut msg = format!("{}OrNode{}", pad(indent), self.limits().simple_display());
-        for i in 0..self.nodes.len() {
-            let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
-            msg.push_str(format!("\n{}", disp_str).as_str());
-        }
-        msg
-    }
-    fn limits(&self) -> Limits { self.lims }
-}
-
-impl TreeNode for SetNode {
-    fn desc(&self, indent: isize) -> String {
-        format!("{}Set {}{}", pad(indent), self.targets_string(), self.limits().simple_display(), )
-    }
-    fn limits(&self) -> Limits { self.lims }
-}
-
 
 //////////////////////////////////////////////////////////////////
 //
@@ -296,7 +214,6 @@ impl TreeNode for SetNode {
 // and returning a Node enum element (complete with its TreeNode filling)
 //
 //////////////////////////////////////////////////////////////////
-
 
 impl CharsNode {
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
@@ -328,18 +245,21 @@ impl CharsNode {
         }
         Ok((if chs.is_empty() { Node::None }
            else {
-               let lims = if chs.len() == 1 { Limits::parse(chars)? } else { Limits::default() };
+               let limits = if chs.len() == 1 { Limits::parse(chars)? } else { Limits::default() };
                Node::Chars(CharsNode {
                    string: chs.into_iter().collect(),
-                   lims
+                   limits
                })
            }).trace())
     }
     /// recovers a CharsNode from the Node::Chars enum
-    fn mut_from_node<'a>(node: &'a mut Node) -> &'a mut CharsNode {
+    fn mut_from_node(node: &mut Node) -> & mut CharsNode {
         if let Node::Chars(chars_node) = node { chars_node }
         else { panic!("trying to get CharsNode from wrong type") }
     }
+    /// Checks a string to see if its head matches the contents of this node
+    fn matches(&self, string: &str) -> bool { string.starts_with(&self.string) }
+    fn desc(&self, indent: isize) -> String { format!("{}CharsNode: '{}'{}", pad(indent), self.string, self.limits.simple_display()) }
 }    
 
 impl SpecialCharNode {
@@ -360,20 +280,28 @@ impl SpecialCharNode {
             },
             _ => { return Ok(Node::None); }
         };
-        Ok(Node::SpecialChar(SpecialCharNode { special, lims: Limits::parse(chars)?}).trace())
+        Ok(Node::SpecialChar(SpecialCharNode { special, limits: Limits::parse(chars)?}).trace())
     }
 
-    fn match_char(&self, ch: char) -> bool {
-        match self.special {
-            '.' => true,                        // all
-            'a' => (' '..='~').contains(&ch),   // ascii printable
-            'd' => ('0'..='9').contains(&ch),   // numeric
-            'n' => ch == '\n',                  // newline
-            'l' => ('a'..='z').contains(&ch),   // lc ascii
-            't' => ch == '\t',                  // tab
-            'u' => ('A'..='Z').contains(&ch),   // uc ascii
-            _ => false
+    /// Checks a string to see if its head matches the contents of this node
+    fn matches(&self, string: &str) -> bool {
+        match string.chars().next() {
+            None => self.special == '$',            // match only end-of-string marker
+            Some(ch) => match self.special {
+                '.' => true,                        // all
+                'a' => (' '..='~').contains(&ch),   // ascii printable
+                'd' => ('0'..='9').contains(&ch),   // numeric
+                'n' => ch == '\n',                  // newline
+                'l' => ('a'..='z').contains(&ch),   // lc ascii
+                't' => ch == '\t',                  // tab
+                'u' => ('A'..='Z').contains(&ch),   // uc ascii
+                _ => false
+            }
         }
+    }
+    fn desc(&self, indent: isize) -> String {
+        let slash = if ".$".contains(self.special) { "" } else { "\\" };
+        format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits.simple_display())
     }
 }
 
@@ -391,14 +319,14 @@ impl AndNode {
             let node = parse(chars)?;
             match node {
                 Node::None => (),
-                Node::Or(_) => { let _ = node.or_into_and(&mut nodes)?;},
+                Node::Or(_) => { node.or_into_and(&mut nodes)?;},
                 _ => nodes.push(node),
             }
         }
         // pop off terminating chars
         let (_, _) = (chars.next(), chars.next());
         Ok((if nodes.is_empty() { Node::None }
-           else { Node::And(AndNode {nodes, lims: Limits::parse(chars)?, named, anchor: false, })}).trace())
+           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, named, anchor: false, })}).trace())
     }
 
     fn parse_named(chars: &mut Peekable) -> Result<Option<String>, Error> {
@@ -427,9 +355,20 @@ impl AndNode {
         }
     }
     /// recovers an AndNode from the Node::And enum
-    fn mut_from_node<'a>(node: &'a mut Node) -> &'a mut AndNode {
+    fn mut_from_node(node: &mut Node) -> &mut AndNode {
         if let Node::And(and_node) = node { and_node }
         else { panic!("trying to get AndNode from wrong type") }
+    }
+
+    fn desc(&self, indent: isize) -> String {
+        let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
+        let mut msg = format!("{}AndNode({}) {} {}", pad(indent), self.nodes.len(), self.limits.simple_display(), name);
+        for i in 0..self.nodes.len() {
+//            let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
+            let disp_str = self.nodes[i].desc(indent + 1);
+            msg.push_str(format!("\n{}", disp_str).as_str());
+        }
+        msg
     }
 }
 
@@ -445,12 +384,22 @@ impl OrNode {
             node.chars_after_or(chars);
             nodes.push(node);
         }
-        Ok(Node::Or(OrNode {nodes, lims: Limits {min: 0, max: 0, lazy: false}}).trace())
+        Ok(Node::Or(OrNode {nodes, limits: Limits {min: 0, max: 0, lazy: false}}).trace())
     }
     /// recovers an OrNode from the Node::Ar enum
-    fn mut_from_node<'a>(node: &'a mut Node) -> &'a mut OrNode {
+    fn mut_from_node(node: &mut Node) -> &mut OrNode {
         if let Node::Or(or_node) = node { or_node }
         else { panic!("trying to get OrNode from wrong type") }
+    }
+
+    fn desc(&self, indent: isize) -> String {
+        let mut msg = format!("{}OrNode{}", pad(indent), self.limits.simple_display());
+        for i in 0..self.nodes.len() {
+            //let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
+            let disp_str = self.nodes[i].desc(indent + 1);
+            msg.push_str(format!("\n{}", disp_str).as_str());
+        }
+        msg
     }
 }
 
@@ -481,9 +430,10 @@ impl SetNode {
         // eiher None or ']'
         if let Some(ch) = chars.next() { if ch != ']' {return Err(Error::make(3, "Unterminated Set")); } };
         Ok((if targets.is_empty() { Node::None }
-           else { Node::Set( SetNode {targets, not, lims: Limits::parse(chars)?}) }).trace())
+           else { Node::Set( SetNode {targets, not, limits: Limits::parse(chars)?}) }).trace())
     }
     
+    /// Checks a string to see if its head matches the contents of this node
     fn matches(&self, string: &str) -> bool {
         match string.chars().next() {
             Some(ch) => self.match_char(ch),
@@ -494,6 +444,10 @@ impl SetNode {
     fn match_char(&self, ch: char) -> bool { self.not != self.targets.iter().any(move |x| x.matches(ch)) }
     fn targets_string(&self) -> String {
         format!("[{}{}]", if self.not {"^"} else {""}, self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join(""))
+    }
+
+    fn desc(&self, indent: isize) -> String {
+        format!("{}Set {}{}", pad(indent), self.targets_string(), self.limits.simple_display(), )
     }
 }    
 // TODO: maybe combine single chars into String so can use contains() to ge all at once?
@@ -535,6 +489,7 @@ impl Set {
             _ => {return Err(Error::make(4, "Unterminated set block"));},
         })
     }
+    /// Checks a string to see if its head matches the contents of this node
     fn matches(&self, ch: char) -> bool {
         match self {
             Set::RegularChars(string) => string.contains(ch),
@@ -608,7 +563,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
     let root = {if let Node::And(r) = tree { r } else { return Err(Error::make(6, "Root of tree should be Node::And")); }};
     if !root.anchor {
         if let Node::Chars(node_0) = &root.nodes[0] {
-            if node_0.limits().min > 0 {
+            if node_0.limits.min > 0 {
                 let copy = node_0.string.to_string();
                 match start.find(&copy) {
                     Some(offset) => {

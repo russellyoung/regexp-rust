@@ -30,7 +30,7 @@
 //!  - **repetition counts**: any expression can beexecuted multiple times by suffixing it with a repetition code 
 //!    - __*__: match any number of times from 0 up
 //!    - **+**: match any number of times from 1 up
-//!    - **?**: match 0 or 1 repitition
+//!    - **?**: match 0 or 1 repetition
 //!    - **{N}**: match exactly N times
 //!    - **{N,}**: match N or more times
 //!    - **{N,M}**: match any number of repititions from M to N

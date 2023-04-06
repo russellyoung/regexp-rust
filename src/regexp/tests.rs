@@ -71,33 +71,33 @@ fn limits_test() {
 // parser tests
 //
 fn make_chars_string(string: &'static str) -> Node {
-        Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min: 1, max: 1, lazy: false}})
+        Node::Chars(CharsNode{string: string.to_string(), limits: Limits{min: 1, max: 1, lazy: false}})
 }
 fn make_chars_single(string: &'static str, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Chars(CharsNode{string: string.to_string(), lims: Limits{min, max, lazy}})
+    Node::Chars(CharsNode{string: string.to_string(), limits: Limits{min, max, lazy}})
 }
 fn make_special(special: char, min: usize, max: usize, lazy: bool) -> Node {
-    Node::SpecialChar(SpecialCharNode {special, lims: Limits {min, max, lazy}})
+    Node::SpecialChar(SpecialCharNode {special, limits: Limits {min, max, lazy}})
 }
 
 fn make_root<'a> (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
 
 fn make_and<'a> (min: usize, max: usize, lazy: bool, name: Option<&'a str>) -> Node {
     let named = {if let Some(n) = name {Some(n.to_string())} else {None}};
-    Node::And(AndNode{nodes: Vec::<Node>::new(), lims: Limits{min, max, lazy}, named, anchor: false})
+    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, named, anchor: false})
 }
 fn make_or() -> Node {
-    Node::Or(OrNode{nodes: Vec::<Node>::new(), lims: Limits::default()})
+    Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default()})
 }
 
 fn make_set(not: bool, targets: Vec<Set>, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Set(SetNode{not, targets, lims: Limits{min, max, lazy}})
+    Node::Set(SetNode{not, targets, limits: Limits{min, max, lazy}})
 }
 fn push_sets(set_node: &mut SetNode, sets: &mut Vec<Set>) {
     set_node.targets.append(sets);
 }
 
-fn make_or_limits(node: &mut OrNode) { node.lims = Limits { min: 0, max: node.nodes.len() - 1, lazy: false }; }
+fn make_or_limits(node: &mut OrNode) { node.limits = Limits { min: 0, max: node.nodes.len() - 1, lazy: false }; }
 
 impl Node {
     fn push(&mut self, node: Node) {

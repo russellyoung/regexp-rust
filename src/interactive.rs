@@ -72,7 +72,8 @@ The commands are:
  - text pop:     pops off (deletes) the current re from the list
  - search:       performs a RE search using the current RE and the current text
  - tree:         displays the parse tree created in the first stage of the RE search using the current RE
- - walk:         displays the progress as the tree is walked in stage 2 of the search
+ - walk [level]: displays the progress as the tree is walked in stage 2 of the search. LEVEL defaults to 2
+                 to provide moderate information, use 1 for less information, 3 for more
  - help:         displays this help
  - ?:            displays this help
 ";
@@ -176,7 +177,7 @@ impl Interactive {
             "text" => self.do_text(subcmd, num, tail, body),
             "search" => self.do_search(subcmd),
             "help" | "?" => println!("{}", HELP_TEXT),
-            "walk" => self.do_walk(),
+            "walk" => self.do_walk(if let Ok(num) = num.parse::<u32>() { num } else { 2 }),
             "quit" => { return false; },
             "exit" => { if yorn("Really exit?", Some(true)) { return false; } }
             "tree" => {
@@ -267,7 +268,9 @@ impl Interactive {
                             let matches = report.get_by_name(subcmd);
                             if matches.is_empty() { println!("No named matches for \"{}\"", subcmd); }
                             else {
-                                for i in 0..matches.len() { println!("  {}) \"{}\", position {}", i, matches[i].found, matches[i].pos.0); }
+                                for (i, matched) in matches.iter().enumerate() {
+                                    println!("  {}) \"{}\", position {}", i, matched.found, matched.pos.0); }
+                                //for i in 0..matches.len() { println!("  {}) \"{}\", position {}", i, matches[i].found, matches[i].pos.0); }
                             }
                         }
                     },                                    
@@ -279,12 +282,12 @@ impl Interactive {
         }
     }
 
-    fn do_walk(&self) {
+    fn do_walk(&self, trace: u32) {
         let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return; }};
         let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return; }};
         match parse_tree(re) {
             Ok(node) => {
-                set_trace(2);
+                set_trace(trace);
                 match walk_tree(&node, text) {
                     Ok(Some((path, char_start, bytes_start))) => println!("{:?}", Report::new(&path, char_start, bytes_start).display(0)),
                     Ok(None) => println!("No match"),
