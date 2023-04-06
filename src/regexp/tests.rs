@@ -102,8 +102,8 @@ fn make_or_limits(node: &mut OrNode) { node.limits = Limits { min: 0, max: node.
 impl Node {
     fn push(&mut self, node: Node) {
         match self {
-            Node::And(and_node) => and_node.push(node),
-            Node::Or(or_node) => or_node.push(node),
+            Node::And(and_node) => and_node.nodes.push(node),
+            Node::Or(or_node) => or_node.nodes.push(node),
             _ => panic!("can only push to And or Or node")
         }
     }
@@ -302,6 +302,10 @@ fn lazy() {
     find(r"abc+d", "xabcccd", "abcccd");
     find(r"a\(bcd\)+?bc", "abcdbcdbcd", "abcdbc");
     find(r"a\(bcd\)+bc", "abcdbcdbcd", "abcdbcdbc");
+    find(r"ab*\|b", "abbbbbc", "abbbbb");
+    find(r"ab*?\|b", "abbbbbc", "a");
+    find(r"ab+?\|b", "abbbbbc", "ab");
+    find(r"ab+?c", "abbbbbc", "abbbbbc");     // lazy back off
 }
 
 

@@ -46,7 +46,6 @@ pub enum Node {Chars(CharsNode), SpecialChar(SpecialCharNode), And(AndNode), Or(
 
 impl core::fmt::Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//        write!(f, "{}", if let Some(node) = self.tree_node() { node.desc(0) } else { "None".to_string() })
         write!(f, "{}", self.desc(0))
     }
 }
@@ -125,14 +124,14 @@ impl Node {
         let mut prev = nodes.pop().unwrap();
         if let Node::Or(_) = prev {
             let mut prev_node = OrNode::mut_from_node(&mut prev);
-            prev_node.push(self);
+            prev_node.nodes.push(self);
             prev_node.limits.max += 1;
             nodes.push(prev);
         } else {
             let or_node = OrNode::mut_from_node(&mut self);
-                or_node.push_front(prev);
-                or_node.limits.max += 1;
-                nodes.push(self);
+            or_node.nodes.insert(0, prev);
+            or_node.limits.max += 1;
+            nodes.push(self);
         }
         Ok(())
     }
@@ -208,7 +207,7 @@ pub struct SetNode {
 
 //////////////////////////////////////////////////////////////////
 //
-// Node, other implementations
+// Node implementations
 //
 // The most important is that each one needs to define a contructor taking the Peekable as input
 // and returning a Node enum element (complete with its TreeNode filling)
@@ -216,6 +215,7 @@ pub struct SetNode {
 //////////////////////////////////////////////////////////////////
 
 impl CharsNode {
+    /// Parses a plain character string from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("CHARS", chars); }
         let mut chs = Vec::<char>::new();
@@ -268,6 +268,7 @@ impl SpecialCharNode {
 
     // called with pointer at a special character. Char can be '.' or "\*". For now I'm assuming this only gets called with special
     // sequences at bat, so no checking is done.
+    /// Parses a special character from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("SPECIAL", chars); }
         let special = match chars.peek_2() {
@@ -305,9 +306,54 @@ impl SpecialCharNode {
     }
 }
 
-impl AndNode {
-    fn push(&mut self, node: Node) { self.nodes.push(node); }
+impl SetNode {
+    /// Parses a character set from the front of the Peekable stream
+    fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
+        if trace(2) { trace_enter("SET", chars); }
+        let mut targets = Vec::<Set>::new();
+        let mut not = false;
+        if let Some(ch) = chars.peek() {
+            if ch == '^' {
+                let _ = chars.next();
+                not = true;
+            }
+        }
+        loop {
+            match chars.peek() {
+                None => break,
+                Some(ch) => {
+                    if ch == ']' { break; }
+                    let target = Set::parse_next(chars)?; 
+                    if target != Set::Empty {targets.push(target) }
+                },
+            }
+        }
+        
+        // eiher None or ']'
+        if let Some(ch) = chars.next() { if ch != ']' {return Err(Error::make(3, "Unterminated Set")); } };
+        Ok((if targets.is_empty() { Node::None }
+           else { Node::Set( SetNode {targets, not, limits: Limits::parse(chars)?}) }).trace())
+    }
+    
+    /// Checks a string to see if its head matches the contents of this node
+    fn matches(&self, string: &str) -> bool {
+        match string.chars().next() {
+            Some(ch) => self.not != self.targets.iter().any(move |x| x.matches(ch)),
+            None => false
+        }
+    }
+    
+    fn targets_string(&self) -> String {
+        format!("[{}{}]", if self.not {"^"} else {""}, self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join(""))
+    }
 
+    fn desc(&self, indent: isize) -> String {
+        format!("{}Set {}{}", pad(indent), self.targets_string(), self.limits.simple_display(), )
+    }
+}    
+
+impl AndNode {
+    /// Recursively parses an AND node from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("AND", chars); }
         let named = AndNode::parse_named(chars)?;
@@ -329,6 +375,7 @@ impl AndNode {
            else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, named, anchor: false, })}).trace())
     }
 
+    /// Parses out the name from a named And
     fn parse_named(chars: &mut Peekable) -> Result<Option<String>, Error> {
         match chars.peek_2() {
             // named match
@@ -373,8 +420,7 @@ impl AndNode {
 }
 
 impl OrNode {
-    fn push(&mut self, node: Node) { self.nodes.push(node); }
-    fn push_front(&mut self, node: Node) { self.nodes.insert(0, node); }
+    /// Recursively parses an AND node from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("OR", chars); }
         let mut nodes = Vec::<Node>::new();
@@ -403,53 +449,6 @@ impl OrNode {
     }
 }
 
-impl SetNode {
-    fn push(&mut self, set: Set) { self.targets.push(set); }
-    
-    fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { trace_enter("SET", chars); }
-        let mut targets = Vec::<Set>::new();
-        let mut not = false;
-        if let Some(ch) = chars.peek() {
-            if ch == '^' {
-                let _ = chars.next();
-                not = true;
-            }
-        }
-        loop {
-            match chars.peek() {
-                None => break,
-                Some(ch) => {
-                    if ch == ']' { break; }
-                    let target = Set::parse_next(chars)?; 
-                    if target != Set::Empty {targets.push(target) }
-                },
-            }
-        }
-        
-        // eiher None or ']'
-        if let Some(ch) = chars.next() { if ch != ']' {return Err(Error::make(3, "Unterminated Set")); } };
-        Ok((if targets.is_empty() { Node::None }
-           else { Node::Set( SetNode {targets, not, limits: Limits::parse(chars)?}) }).trace())
-    }
-    
-    /// Checks a string to see if its head matches the contents of this node
-    fn matches(&self, string: &str) -> bool {
-        match string.chars().next() {
-            Some(ch) => self.match_char(ch),
-            None => false
-        }
-    }
-    
-    fn match_char(&self, ch: char) -> bool { self.not != self.targets.iter().any(move |x| x.matches(ch)) }
-    fn targets_string(&self) -> String {
-        format!("[{}{}]", if self.not {"^"} else {""}, self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join(""))
-    }
-
-    fn desc(&self, indent: isize) -> String {
-        format!("{}Set {}{}", pad(indent), self.targets_string(), self.limits.simple_display(), )
-    }
-}    
 // TODO: maybe combine single chars into String so can use contains() to ge all at once?
 /// Used to represent the characters in a SET (represented in the RE by "[a-mxyz]" or "[^\da-g]"
 #[derive(Debug,PartialEq)]
@@ -614,6 +613,13 @@ fn char_bytes(string: &str, char_count: usize) -> usize {
 //
 //////////////////////////////////////////////////////////////////
 #[derive(Debug,Clone,Copy,PartialEq)] 
+/// Holds and handles the limit information for a Node: the min and max repetitions allowed, and whether
+/// it is lazy or not.
+/// **IMPORTANT**: MIN and MAX are the actual sizes allowed (that is, ? is min 0, max 1). But the check()
+/// method takes as input the number of Steps in the Path. Since there is an entry for 0 steps the number
+/// passed to check() is actually one higher than the actual repetition count (this is because the arg
+/// passed in is USIZE, and needs to handle a < 0 condition when 0 reps does not match). However this is
+/// handled it causes confusion somewhere, this way handling is limited to the check() method.
 pub struct Limits {
     min: usize,
     max: usize,

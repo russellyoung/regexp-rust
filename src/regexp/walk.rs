@@ -214,6 +214,7 @@ impl<'a> Path<'a> {
         let mut reports = Vec::<Report>::new();
         match self {
             Path::And(steps) => {
+                // 0 - based: this case means there were no matches to a * or ? rep count
                 if steps.len() == 1 {
                     let (mut subreport, _pos,) = steps[0].make_report(char_pos, byte_pos);
                     if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
