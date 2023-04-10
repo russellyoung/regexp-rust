@@ -29,6 +29,7 @@ pub struct CharsStep<'a> {
 }
 
 /// Represents a single step for a SpecialCharNode (characters with special meaning, like '.' or '\\d'
+/*
 pub struct SpecialStep<'a> {
     /// The node from phase 1
     node: &'a SpecialCharNode,
@@ -37,7 +38,7 @@ pub struct SpecialStep<'a> {
     /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
     match_len: usize,
 }
-
+*/
 /// Represents a single step for a SetNode (characters belonging to a defined set, like [a-z .,]
 pub struct SetStep<'a> {
     /// The node from phase 1
@@ -86,7 +87,7 @@ pub struct OrStep<'a> {
 /// Path fails it backtracks a Step and tries again.
 //
 //////////////////////////////////////////////////////////////////
-pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), Special(Vec<SpecialStep<'a>>), Set(Vec<SetStep<'a>>), And(Vec<AndStep<'a>>), Or(OrStep<'a>), None }
+pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), /*Special(Vec<SpecialStep<'a>>),*/ Set(Vec<SetStep<'a>>), And(Vec<AndStep<'a>>), Or(OrStep<'a>), None }
 
 impl<'a> Path<'a> {
     pub fn is_empty(&self) -> bool { self.len() == 0 }
@@ -95,7 +96,7 @@ impl<'a> Path<'a> {
     pub fn len(&self) -> usize {
         match self {
             Path::Chars(steps) => steps.len(),
-            Path::Special(steps) => steps.len(),
+//            Path::Special(steps) => steps.len(),
             Path::Set(steps) => steps.len(),
             Path::And(steps) => steps.len(),
             Path::Or(step) => step.node.nodes.len() - step.which,
@@ -107,7 +108,7 @@ impl<'a> Path<'a> {
     fn match_len(&self) -> usize {
         match self {
             Path::Chars(steps) =>    steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
-            Path::Special(steps) =>  steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
+//            Path::Special(steps) =>  steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
             Path::Set(steps) =>      steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
             Path::And(steps) =>      steps[0].string.len() - ref_last(steps).string.len() + ref_last(steps).match_len ,
             Path::Or(step) =>        step.match_len ,
@@ -120,7 +121,7 @@ impl<'a> Path<'a> {
         let match_len = self.match_len();
         match self {
             Path::Chars(steps) =>    &steps[0].string[0..match_len],
-            Path::Special(steps) =>  &steps[0].string[0..match_len],
+//            Path::Special(steps) =>  &steps[0].string[0..match_len],
             Path::Set(steps) =>      &steps[0].string[0..match_len],
             Path::And(steps) =>      &steps[0].string[0..match_len],
             Path::Or(step) =>        &step.string[0..match_len],
@@ -133,7 +134,7 @@ impl<'a> Path<'a> {
         let len = self.match_len();
         match self {
             Path::Chars(steps) =>    &steps[0].string[len..],
-            Path::Special(steps) =>  &steps[0].string[len..],
+//            Path::Special(steps) =>  &steps[0].string[len..],
             Path::Set(steps) => &steps[0].string[len..],
             Path::And(steps) =>      &steps[0].string[len..],
             Path::Or(step) =>        &step.string[len..],
@@ -169,7 +170,7 @@ impl<'a> Path<'a> {
     fn greedy_pop(&mut self, ) {
         match self {
             Path::Chars(steps) =>    { let _ = steps.pop(); },
-            Path::Special(steps) =>  { let _ = steps.pop();},
+//            Path::Special(steps) =>  { let _ = steps.pop();},
             Path::Set(steps) =>      { let _ = steps.pop();},
             Path::And(steps) =>      { let _ = steps.pop();},
             Path::None =>            panic!("NONE unexpected"),
@@ -186,7 +187,7 @@ impl<'a> Path<'a> {
         self.limits().check(self.len() + 1) == 0
             && match self {
                 Path::Chars(steps) =>    { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
-                Path::Special(steps) =>  { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
+//                Path::Special(steps) =>  { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
                 Path::Set(steps) =>      { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
                 Path::And(steps) =>      { if let Some(step) = steps[steps.len() - 1].step() {steps.push(step); true} else { false}},
                 Path::None =>            panic!("NONE unexpected"),
@@ -198,7 +199,7 @@ impl<'a> Path<'a> {
     fn limits(&self) -> Limits {
         match self {
             Path::Chars(steps) =>    steps[0].node.limits,
-            Path::Special(steps) =>  steps[0].node.limits,
+//            Path::Special(steps) =>  steps[0].node.limits,
             Path::Set(steps) =>      steps[0].node.limits,
             Path::And(steps) =>      steps[0].node.limits,
             Path::Or(step) =>        step.node.limits,
@@ -259,17 +260,19 @@ impl<'a> Path<'a> {
 //////////////////////////////////////////////////////////////////
 impl<'a> Debug for CharsStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "CHARS \"{}\"{}, string {}", self.node.string, self.node.limits.simple_display(), abbrev(self.string) )
+        write!(f, "{}, string {}", self.node.desc(0), abbrev(self.string) )
     }
 }
+/*
 impl<'a> Debug for SpecialStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "SPECIAL \"{}\"{}, string {}", self.node.special, self.node.limits.simple_display(), abbrev(self.string))
     }
 }
+*/
 impl<'a> Debug for SetStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "SET \"{}\"{}, string {}", self.node.targets_string(), self.node.limits.simple_display(), abbrev(self.string))
+        write!(f, "{}, string {}", self.node.desc(0), abbrev(self.string))
     }
 }
 impl<'a> Debug for AndStep<'a> {
@@ -293,10 +296,10 @@ impl<'a> Debug for Path<'a> {
                 if steps.is_empty() { write!(f, "CHARS, reps 0, match \"\"") }
                 else {write!(f, "{:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
             },
-            Path::Special(steps) =>  {
-                if steps.is_empty() { write!(f, "SPECIAL, reps 0, match \"\"") }
-                else { write!(f, "{:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
-            },
+//            Path::Special(steps) =>  {
+//                if steps.is_empty() { write!(f, "SPECIAL, reps 0, match \"\"") }
+//                else { write!(f, "{:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
+//            },
             Path::Set(steps) => {
                 if steps.is_empty() { write!(f, "SET, reps 0, match \"\"") }
                 else {write!(f, "{:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
@@ -344,11 +347,12 @@ impl<'a> CharsStep<'a> {
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<CharsStep<'a>> {
         let string = &self.string[self.match_len..];
-        if self.node.matches(string) { Some(CharsStep {node: self.node, string, match_len: self.node.string.len()}) }
-        else { None }
+        if let Some(match_len) = self.node.matches(string) {
+            Some(CharsStep {node: self.node, string, match_len})
+        } else { None }
     }
 }
-        
+/*        
 impl<'a> SpecialStep<'a> {
     /// start a Path using a special char, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a SpecialCharNode, string: &'a str) -> Path<'a> {
@@ -376,7 +380,7 @@ impl<'a> SpecialStep<'a> {
         else { None }
     }
 }
-
+*/
 impl<'a> SetStep<'a> {
     /// start a Path using a set to match, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a SetNode, string: &'a str) -> Path<'a> {
@@ -500,6 +504,7 @@ impl<'a> OrStep<'a> {
         }
         for which in 0..node.nodes.len() {
             let child_path = node.nodes[which].walk(string);
+            println!("xxxxxx {:#?}, {}", child_path.limits(), child_path.len());
             if child_path.limits().check(child_path.len()) == 0 {
                 let match_len = child_path.match_len();
                 return Path::Or(OrStep {node, string, which, child_path: Box::new(child_path), match_len}).trace(2, "end walk0");
