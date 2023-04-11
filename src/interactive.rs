@@ -177,13 +177,13 @@ impl Interactive {
             "text" => self.do_text(subcmd, num, tail, body),
             "search" => self.do_search(subcmd),
             "help" | "?" => println!("{}", HELP_TEXT),
-            "walk" => self.do_walk(if let Ok(num) = num.parse::<u32>() { num } else { 2 }),
+            "walk" => self.do_walk(if let Ok(num) = num.parse::<usize>() { num } else { 2 }),
             "quit" => { return false; },
             "exit" => { if yorn("Really exit?", Some(true)) { return false; } }
             "tree" => {
                 if let Some(re) = self.re() {
                     match parse_tree(re) {
-                        Ok(node) => println!("--- Parse tree:\n{:?}", node),
+                        Ok(node) => { println!("--- Parse tree:"); node.desc(0); }
                         Err(error) => println!("Error parsing tree: {}", error),
                     }
                 } else { println!("No current RE, first enter one"); }
@@ -263,7 +263,7 @@ impl Interactive {
                 match walk_tree(&node, text) {
                     Ok(Some((path, char_start, bytes_start))) => {
                         let report = Report::new(&path, char_start, bytes_start);
-                        if subcmd.is_empty() { println!("{:?}", report.display(0)); }
+                        if subcmd.is_empty() { report.display(0) }
                         else {
                             let matches = report.get_by_name(subcmd);
                             if matches.is_empty() { println!("No named matches for \"{}\"", subcmd); }
@@ -282,7 +282,7 @@ impl Interactive {
         }
     }
 
-    fn do_walk(&self, trace: u32) {
+    fn do_walk(&self, trace: usize) {
         let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return; }};
         let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return; }};
         match parse_tree(re) {

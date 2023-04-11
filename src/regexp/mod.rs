@@ -11,7 +11,7 @@ pub mod walk;
 mod tests;
 
 use std::str::Chars;
-use crate::{pad, trace, trace_indent, trace_change_indent, trace_set_indent};
+use crate::{trace, trace_indent, trace_change_indent, trace_set_indent, TAB_SIZE};
 use core::fmt::{Debug,};
 use std::collections::HashMap;
 
@@ -46,7 +46,13 @@ pub enum Node {Chars(CharsNode), And(AndNode), Or(OrNode), Set(SetNode), None, }
 
 impl core::fmt::Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.desc(0))
+        match self {
+            Node::Chars(a)       => a.fmt(f),
+            Node::And(a)         => a.fmt(f),
+            Node::Or(a)          => a.fmt(f),
+            Node::Set(a)         => a.fmt(f),
+            Node::None           => write!(f, "None")
+        }
     }
 }
 
@@ -63,13 +69,13 @@ impl Node {
     }
 
     /// **desc()** is like Debug or Display, but for branches it pretty-prints both the node and its descendents
-    fn desc(&self, indent: isize) -> String {
+    pub fn desc(&self, indent: usize) {
         match self {
             Node::Chars(a)       => a.desc(indent),
             Node::And(a)         => a.desc(indent),
             Node::Or(a)          => a.desc(indent),
             Node::Set(a)         => a.desc(indent),
-            Node::None           => "None".to_string(),
+            Node::None           => print!("{0:1$}", "None", indent),
         }
     }
         
@@ -86,7 +92,8 @@ impl Node {
                 (Node::And(_), _) | (_, Node::Or(_)) => trace_change_indent(-1),
                 _ => ()
             }
-            println!("{}Created {:?}", trace_indent(), self);
+    trace_indent();
+            println!("Created {:?}", self);
         }
         self
     }
@@ -96,7 +103,8 @@ impl Node {
 /// the *Node::trace()* call, which reduces the indent when AND or OR are exited.
 fn trace_enter(name: &str, chars: &mut Peekable) {
     let chs = chars.peek_n(3);
-    println!("{}{} starting from \"{}{}{}\"", trace_indent(), name, chs[0].unwrap(), chs[1].unwrap(), chs[2].unwrap_or(' '));
+    trace_indent();
+    println!("{} starting from \"{}{}{}\"", name, chs[0].unwrap(), chs[1].unwrap(), chs[2].unwrap_or(' '));
     if name == "AND" || name == "OR" { trace_change_indent(1); }
 }
 
@@ -106,14 +114,14 @@ fn trace_enter(name: &str, chars: &mut Peekable) {
 
 /// represents strings of regular characters that match themselves in the target string. This is a leaf node in the parse tree.
 /// Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, PartialEq)]
 pub struct CharsNode {
     limits: Limits,
     blocks: Vec<CharsContents>,
 }
 
 /// handles AND (sequential) matches: this node represents a branch in the parse tree
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, PartialEq)]
 pub struct AndNode {
     limits: Limits,
     nodes: Vec<Node>,
@@ -123,7 +131,7 @@ pub struct AndNode {
 }
 
 /// handles OR nodes (A\|B style matches). This node represents a branch in the parse tree
-#[derive(Default, PartialEq, Debug)]
+#[derive(Default, PartialEq)]
 pub struct OrNode {
     nodes: Vec<Node>,
     /// Limits for OR nodes are different from other nodes. ORs cannot be repeated (except by enclosing them in
@@ -132,7 +140,7 @@ pub struct OrNode {
 }
 
 /// handles [a-z] style matches. This node represents a branch in the parse tree
-#[derive(Default, PartialEq, Debug)]
+#[derive(Default, PartialEq)]
 pub struct SetNode {
     limits: Limits,
     targets: Vec<Set>,
@@ -192,6 +200,12 @@ impl CharsContents {
     }
 }
 
+impl Debug for CharsNode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "CharsNode: '{}'{}", self.blocks.iter().map(|x| x.repr()).collect::<String>(), self.limits.simple_display())
+    }
+}
+    
 impl CharsNode {
     const ESCAPE_CODES: &str = "adntlu";
     fn parse_node(chars: &mut Peekable, count: isize) -> Result<Node, Error> {
@@ -247,7 +261,7 @@ impl CharsNode {
     }
 
     fn split_last(mut self) -> Result<(Option<Node>, Node), Error> {
-        let mut fake_peekable = Peekable::new(&r"\(");
+        let mut fake_peekable = Peekable::new(r"\(");
         self.return_1(&mut fake_peekable);
         let node_2 = CharsNode::parse_node(&mut fake_peekable, 1)?;
         Ok(( if self.blocks.is_empty() { None } else { Some(Node::Chars(self)) }, node_2))
@@ -285,8 +299,9 @@ impl CharsNode {
         Some(total_len)
     }
     
-    fn desc(&self, indent: isize) -> String {
-        format!("{}CharsNode: '{}'{}", pad(indent), self.blocks.iter().map(|x| x.repr()).collect::<String>(), self.limits.simple_display())
+    fn desc(&self, indent: usize) {
+        print!("{0:1$}", "", indent);
+        println!("{:?}", self);
     }
     fn char_count(&self) -> usize { self.blocks.iter().map(|x| x.len()).sum() }
     fn match_len(&self) -> usize {
@@ -299,6 +314,12 @@ impl CharsNode {
     }
 }    
 
+impl Debug for SetNode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "SET: '{}'{}", self.targets_string(), self.limits.simple_display(), )
+    }
+}
+    
 impl SetNode {
     /// Parses a character set from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
@@ -340,21 +361,32 @@ impl SetNode {
         format!("[{}{}]", if self.not {"^"} else {""}, self.targets.iter().map(|x| x.desc()).collect::<Vec<_>>().join(""))
     }
 
-    fn desc(&self, indent: isize) -> String {
-        format!("{}SET {}{}", pad(indent), self.targets_string(), self.limits.simple_display(), )
+    fn desc(&self, indent: usize) {
+        print!("{0:1$}", "", indent);
+        println!("{:?}", self);
     }
 }    
 
+impl Debug for AndNode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
+        write!(f, "AndNode({}) {} {}", self.nodes.len(), self.limits.simple_display(), name)
+    }
+}
+    
 impl AndNode {
     /// Recursively parses an AND node from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("AND", chars); }
         let named = AndNode::parse_named(chars)?;
+        println!("named is {:#?}", named);
         let mut nodes = Vec::<Node>::new();
         loop {
-            let (ch0, ch1) = chars.peek_2();
-            if ch0.is_none() { return Err(Error::make(2, "Unterminated AND node")); }
-            if ch0.unwrap() == '\\' && ch1.unwrap_or('x') == ')' { break; }
+            match chars.peek_2() {
+                (None, _) => { return Err(Error::make(2, "Unterminated AND node")); },
+                (Some('\\'), Some(')')) => { break; },
+                _ => (),
+            }
             match parse(chars, false)? {
                 (None, node) => nodes.push(node),
                 (Some(pre_node), node) => {
@@ -401,15 +433,18 @@ impl AndNode {
         else { panic!("trying to get AndNode from wrong type") }
     }
 
-    fn desc(&self, indent: isize) -> String {
-        let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
-        let mut msg = format!("{}AndNode({}) {} {}", pad(indent), self.nodes.len(), self.limits.simple_display(), name);
+    fn desc(&self, indent: usize) {
+        print!("{0:1$}", "", indent);
+        println!("{:?}", self);
         for i in 0..self.nodes.len() {
-//            let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
-            let disp_str = self.nodes[i].desc(indent + 1);
-            msg.push_str(format!("\n{}", disp_str).as_str());
+            self.nodes[i].desc(indent + TAB_SIZE);
         }
-        msg
+    }
+}
+
+impl Debug for OrNode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "OrNode{}", self.limits.simple_display())
     }
 }
 
@@ -434,14 +469,12 @@ impl OrNode {
         else { panic!("trying to get OrNode from wrong type") }
     }
     
-    fn desc(&self, indent: isize) -> String {
-        let mut msg = format!("{}OrNode{}", pad(indent), self.limits.simple_display());
+    fn desc(&self, indent: usize) {
+        print!("{0:1$}", "", indent);
+        println!("{:?}", self);
         for i in 0..self.nodes.len() {
-            //let disp_str = { if let Some(node) = self.nodes[i].tree_node() { node.desc(indent + 1) } else { format!("{:?}", self.nodes[i]) }};
-            let disp_str = self.nodes[i].desc(indent + 1);
-            msg.push_str(format!("\n{}", disp_str).as_str());
+            self.nodes[i].desc(indent + TAB_SIZE);
         }
-        msg
     }
 }
 
@@ -459,6 +492,7 @@ impl Set {
             Set::Empty => "*EMPTY*".to_string(),
         }
     }
+    
     fn parse_next(chars: &mut Peekable) -> Result<Set, Error> {
         let peeks = chars.peek_n(3);
         Ok(match (peeks[0], peeks[1], peeks[2]) {
@@ -620,21 +654,25 @@ pub struct Limits {
 
 impl Default for Limits { fn default() -> Limits { Limits{min: 1, max: 1, lazy: false} } }
 
-impl Limits {
-    /// Display every Limit in a *{min, max}* format for debugging
-    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"?"} else {""})}
-    fn to_string(&self) -> String {
+impl std::fmt::Display for Limits {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut reps = match (self.min, self.max) {
             (1, 1) => "".to_string(),
             (0, 1) => "?".to_string(),
             (0, EFFECTIVELY_INFINITE) => "*".to_string(),
             (1, EFFECTIVELY_INFINITE) => "+".to_string(),
             (min, EFFECTIVELY_INFINITE) => format!("{{{},}}", min),
-            (min, max) => { if min == max { format!("{{{},}}", min) } else {format!("{{{},}}", min)} },
+            (min, max) => { if min == max { format!("{{{}}}", min) } else {format!("{{{},{}}}", min, max)} },
         };
-        if self.lazy { reps.push_str("?"); }
-        reps
+        if self.lazy { reps.push('?'); }
+        f.write_str(reps.as_str())
     }
+}
+
+impl Limits {
+    /// Display every Limit in a *{min, max}* format for debugging
+    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"?"} else {""})}
+
     /// returns a Limit struct parsed out from point. If none is there returns the default
     /// Like parse_if() but always returns astruct, using the default if there is none in the string
     fn parse(chars: &mut Peekable) -> Result<Limits, Error> {
@@ -743,11 +781,12 @@ impl Report {
     }
     
     /// Pretty-prints a report with indentation to help make it easier to read
-    pub fn display(&self, indent: isize) {
+    pub fn display(&self, indent: usize) {
         let name_str = { if let Some(name) = &self.name { format!("<{}>", name) } else { "".to_string() }};
-        println!("{}\"{}\" char position [{}, {}] byte position [{}, {}] {}",
-                 pad(indent), self.found, self.pos.0, self.pos.1, self.bytes.0, self.bytes.1, name_str);
-        self.subreports.iter().for_each(move |r| r.display(indent + 1));
+        print!("{0:1$}", "", indent);
+        println!("\"{}\" char position [{}, {}] byte position [{}, {}] {}",
+                 self.found, self.pos.0, self.pos.1, self.bytes.0, self.bytes.1, name_str);
+        self.subreports.iter().for_each(move |r| r.display(indent + TAB_SIZE));
     }
 
     /// Gets **Report** nodes representing matches for named Nodes. The return is a *Vec* because named matches can occur multiple

@@ -146,7 +146,9 @@ impl<'a> Path<'a> {
         } else {
             self.greedy_pop()
         };
-        if trace(3) { println!("{}backoff: {:?}, success: {}", trace_indent(), self, ret)}
+        if trace(3) {
+            trace_indent();
+            println!("backoff: {:?}, success: {}", self, ret)}
         ret
     }
 
@@ -227,10 +229,11 @@ impl<'a> Path<'a> {
     }
 
     /// called when a Path has completed to print its trace, if debugging is enabled
-    fn trace(self, level: u32, prefix: &'a str) -> Path {
+    fn trace(self, level: usize, prefix: &'a str) -> Path {
         if trace(level) {
             trace_change_indent(-1);
-            println!("{}{} {:?}", trace_indent(), prefix, &self);
+            trace_indent();
+            println!("{} {:?}", prefix, &self);
         }
         self
     }
@@ -243,12 +246,12 @@ impl<'a> Path<'a> {
 //////////////////////////////////////////////////////////////////
 impl<'a> Debug for CharsStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}, string {}", self.node.desc(0), abbrev(self.string) )
+        write!(f, "{:?}, string {}", self.node, abbrev(self.string) )
     }
 }
 impl<'a> Debug for SetStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}, string {}", self.node.desc(0), abbrev(self.string))
+        write!(f, "{:?}, string {}", self.node, abbrev(self.string))
     }
 }
 impl<'a> Debug for AndStep<'a> {
@@ -301,13 +304,16 @@ impl<'a> CharsStep<'a> {
         let mut steps = Vec::<CharsStep>::new();
         steps.push(CharsStep {node, string, match_len: 0});
         if trace(2) {
-            println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
+            trace_indent();
+            println!("Starting walk for {:?}", &steps[0]);
             trace_change_indent(1);
         }
         for _i in 1..=node.limits.initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
-                    if trace(3) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
+                    if trace(3) {
+                        trace_indent();
+                        println!("Pushing {:?} rep {}", s, steps.len() + 1); }
                     steps.push(s);
                 },
                 None => break,
@@ -319,9 +325,7 @@ impl<'a> CharsStep<'a> {
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<CharsStep<'a>> {
         let string = &self.string[self.match_len..];
-        if let Some(match_len) = self.node.matches(string) {
-            Some(CharsStep {node: self.node, string, match_len})
-        } else { None }
+        self.node.matches(string).map(|match_len| CharsStep {node: self.node, string, match_len})
     }
 }
 
@@ -331,13 +335,17 @@ impl<'a> SetStep<'a> {
         let mut steps = Vec::<SetStep>::new();
         steps.push(SetStep {node, string, match_len: 0});
         if trace(2) {
-            println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
+            trace_indent();
+            println!("Starting walk for {:?}", &steps[0]);
             trace_change_indent(1);
         }
         for _i in 1..=node.limits.initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
-                    if trace(3) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
+                    if trace(3) {
+                        trace_indent();
+                        println!("Pushing {:?} rep {}", s, steps.len() + 1);
+                    }
                     steps.push(s);
                 },
                 None => { break; }
@@ -359,13 +367,16 @@ impl<'a> AndStep<'a> {
         let mut steps = Vec::<AndStep>::new();
         steps.push(AndStep {node, string, match_len: 0, child_paths: Vec::<Path<'a>>::new()});
         if trace(2) {
-            println!("{}Starting walk for {:?}", trace_indent(), &steps[0]);
+            trace_indent();
+            println!("Starting walk for {:?}", &steps[0]);
             trace_change_indent(1);
         }
         for _i in 1..=node.limits.initial_walk_limit() {
             match ref_last(&steps).step() {
                 Some(s) => {
-                    if trace(3) { println!("{}Pushing {:?} rep {}", trace_indent(), s, steps.len() + 1); }
+                    if trace(3) {
+                        trace_indent();
+                        println!("Pushing {:?} rep {}", s, steps.len() + 1); }
                     steps.push(s);
                 },
                 None => { break; }
@@ -392,7 +403,8 @@ impl<'a> AndStep<'a> {
                 step.child_paths.push(child_path);
                 if trace(3) {
                     trace_change_indent(-1);
-                    println!("{}new step: {:?}", trace_indent(), step);
+                    trace_indent();
+                    println!("new step: {:?}", step);
                     trace_change_indent(1);
                 }
             } else if !step.back_off() {
@@ -443,7 +455,8 @@ impl<'a> OrStep<'a> {
     pub fn walk(node: &'a OrNode, string: &'a str) -> Path<'a> {
         if trace(2) {
             let fake = OrStep {node, string, which: 0, child_path: Box::new(Path::None), match_len: 0};
-            println!("{}Starting walk for {:?}", trace_indent(), fake);
+            trace_indent();
+            println!("Starting walk for {:?}", fake);
             trace_change_indent(1);
         }
         for which in 0..node.nodes.len() {

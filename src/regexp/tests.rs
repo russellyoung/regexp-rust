@@ -129,7 +129,7 @@ fn test_string_embedded_reps() {
 }
               
 #[test]
-fn txest_string_embedded_reps_lazy() {
+fn test_string_embedded_reps_lazy() {
     let mut node = make_root(1, 1, false);
     node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
     node.push(make_chars_single(CharsContents::Regular("c".to_string()), 0, 1, true));
@@ -140,21 +140,7 @@ fn txest_string_embedded_reps_lazy() {
     node.push(make_chars_string(vec![CharsContents::Regular("jk".to_string())]));
     assert_eq!(node, parse_tree("abc??def+?ghi*?jk").unwrap());
 }
-/*              
-#[test]
-fn test_special_in_string() {
-    let mut node = make_root(1, 1, false);
-    node.push(make_chars_string("abc"));
-    node.push(make_special('.', 1, 1, false));
-    node.push(make_chars_string("def", ));
-    node.push(make_special('d', 0, 1, false));
-    node.push(make_chars_string("gh", ));
-    node.push(make_special('.', 1, 3, false));
-    node.push(make_chars_string("ij", ));
-    println!("{:#?}", parse_tree(r"abc.def\d?gh").unwrap());
-    assert_eq!(node, parse_tree(r"abc.def\d?gh.{1,3}ij").unwrap());
-}
-*/    
+
 #[test]
 fn or_with_chars_bug() {
     let mut node = make_root(1, 1, false);

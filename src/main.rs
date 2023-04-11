@@ -67,6 +67,8 @@ mod interactive;
 use crate::regexp::Report;
 use crate::interactive::Interactive;
 
+use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering::{Acquire, Release, AcqRel}};
+
 use clap::{Parser, value_parser};               // Command Line Argument Processing
 
 /// default value for the **--interactive** switch
@@ -79,35 +81,37 @@ const DEBUG_DEFAULT: u32 = 0;
 const ABBREV_DEFAULT: u32 = 5;
 
 /// value for tab size: the number of spaces to indent for each level
-const TAB_SIZE:isize = 4;
+const TAB_SIZE:usize = 4;
 
-// TODO: make this a macro?
-static mut TRACE_LEVEL: u32 = 0;
-fn set_trace(level: u32) { unsafe { TRACE_LEVEL = level }}
+// TODO: make trace a macro?
+/// the debug levelthe program is running under
+static TRACE_LEVEL: AtomicUsize = AtomicUsize::new(0);
+/// the number of indents to print before nested trace lines
+static TRACE_INDENT: AtomicIsize = AtomicIsize::new(0);
+
+fn set_trace(level: usize) {
+    TRACE_LEVEL.store(level, Release)
+}
+
 /// **trace()** is used to control output of debug information, and also to view steps in the walk phase. It uses a static mut value in order to be available everywhere. 
-pub(crate) fn trace(level: u32) -> bool { unsafe { level <= TRACE_LEVEL }}
-
-static mut TRACE_INDENT:isize = 0;
+pub(crate) fn trace(level: usize) -> bool {
+    level <= TRACE_LEVEL.load(Acquire)
+}
 
 /// **trace_change_indent()** is used to increase or decrease the current trace indent level
-pub(crate) fn trace_change_indent(delta: isize) { unsafe { TRACE_INDENT += delta; } }
+pub(crate) fn trace_change_indent(delta: isize) {
+    TRACE_INDENT.fetch_add(delta, AcqRel);
+}
 /// **trace_set_indent()** is used to reset the indent level to a desired value, usually 0
-pub(crate) fn trace_set_indent(size: isize) { unsafe { TRACE_INDENT = size; } }
+pub(crate) fn trace_set_indent(size: isize) {
+    TRACE_INDENT.store(size, Release);
+}
+pub(crate) fn trace_get_indent() -> usize {
+    usize::try_from(TRACE_INDENT.load(Acquire)).unwrap_or_default() * TAB_SIZE
+}
 /// ** trace_indent()** gets the number of spaces to use as prefix to trace output
-pub(crate) fn trace_indent() -> String { unsafe { pad(TRACE_INDENT) }}
-
-/// A helper function to format debug. It provides strings of spaces to format output dynamically.
-/// An indent level consists of the number of spaces given by TAB_SIZE,
-///
-/// **Args**:
-///   - x: the number of levels to indent
-///
-/// **Returns**:
-///   - String: string consisting of x * *TAB_SIZE* spaces
-
-fn pad(x: isize) -> String {
-    let pad = { if x < 0 {0} else {(TAB_SIZE*x) as usize}};
-    format!("{:pad$}", "")
+pub(crate) fn trace_indent() {
+    print!("{0:1$}", "", trace_get_indent());
 }
 
 // (regular Expressions Rust): sample Rust program to search strings using regular expressions
@@ -176,12 +180,15 @@ pub fn main() {
     
     if config.interactive { return Interactive::new(config).run(); }
     
-    set_trace(config.debug);
+    set_trace(config.debug as usize);
     // execution starts
     match regexp::parse_tree(&config.re) {
         Err(error) => println!("{}", error),
         Ok(tree) => {
-            if config.tree { println!("--- Parse tree:\n{:?}", tree); }
+            if config.tree {
+                println!("--- Parse tree:");
+                tree.desc(0);
+            }
             if !config.text.is_empty() {
                 match regexp::walk_tree(&tree, &config.text) {
                     Ok(Some((path, char_start, bytes_start))) => Report::new(&path, char_start, bytes_start).display(0),
