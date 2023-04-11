@@ -386,7 +386,7 @@ fn reports() {
 //
 fn e_check(re: &str, ecode: usize) {
     match parse_tree(re) {
-        Ok(_) => panic!("Expected error parsing \"{}\", didn't get it", re),
+        Ok(_) => panic!("Expected error {} parsing \"{}\", didn't get it", ecode, re),
         Err(error) => assert!(error.code == ecode, "Parsing \"{}\", expected error {}, found error {} ({})", re, ecode, error.code, error.msg),
     }
 }

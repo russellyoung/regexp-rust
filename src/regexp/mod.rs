@@ -77,63 +77,6 @@ impl Node {
     /// if the code finds this it means an error condition
     fn is_none(&self) -> bool { *self == Node::None }
 
-    //
-    // Following are to handle special cases in building the tree. If I could redesign regexps they wouldn't be needed, but
-    // to get the right behavior sometimes special tweaking is needed.
-    //
-    
-    /// Using \| for OR in a re requires special handling in the tree. This is one of the methods which alters the tree to include an OR node.
-    /// When an OR node is finishing its parsing it has already consumed the following unit. If that unit is a character string only the first char
-    /// should be bound to the OR. This returns any subsequent characters to the processing queue so they can be redone.
-    fn chars_after_or(&mut self, _chars: &mut Peekable) {
-        if let Node::Chars(_chars_node) = self {   // TODO
-//            while chars_node.string.len() > 1 {
-//                chars.put_back(chars_node.string.pop().unwrap());
-//            }
-        }
-    }
-
-    /// Using \| for OR in a re requires special handling in the tree. This is one of the methods which alters the tree to include an OR node
-    /// For the case abc\|XXX, break the preceding "abc" into "ab" and "c" since only the "c" binds with the OR
-    fn chars_before_or(nodes: &mut Vec<Node>) {
-        let prev_is_chars = matches!(&nodes[nodes.len() - 1], Node::Chars(_));
-        if prev_is_chars {
-            let mut prev = nodes.pop().unwrap();
-            let chars_node = CharsNode::mut_from_node(&mut prev);
-            if chars_node.char_count() > 1 {
-//                let new_node = Node::Chars(CharsNode {string: chars_node.string.pop().unwrap().to_string(), limits: Limits::default()});
-//                nodes.push(prev);
-//                nodes.push(new_node);
-            } else {
-                nodes.push(prev);
-            }                
-        }
-    }
-    /// This handles the case where an OR is being inserted ino an AND.
-    ///  - If the preceding node is an OR this OR node gets discarded and its condition is appended to the
-    ///    existing one.
-    ///  - If the preceding node is not an OR then that node is removed from the AND list and inserted as the
-    ///    first element in the OR list.
-    ///  - In addition, if the preceding node is CHARS and its length is >1 it needs to be split, since the
-    ///    OR only binds a single character
-    fn or_into_and(mut self, nodes: &mut Vec<Node>) -> Result<(), Error> {
-        if nodes.is_empty() { return Err(Error::make(9, "OR with no predecessor")); }
-        Node::chars_before_or(nodes);
-        let mut prev = nodes.pop().unwrap();
-        if let Node::Or(_) = prev {
-            let mut prev_node = OrNode::mut_from_node(&mut prev);
-            prev_node.nodes.push(self);
-            prev_node.limits.max += 1;
-            nodes.push(prev);
-        } else {
-            let or_node = OrNode::mut_from_node(&mut self);
-            or_node.nodes.insert(0, prev);
-            or_node.limits.max += 1;
-            nodes.push(self);
-        }
-        Ok(())
-    }
-
     /// Called on Node creation, so if the race level is 2 or higher a message is output on node creation
     /// **Important:** This function decreases the indent depth when called from AND or OR. It should be at the same trace level as
     /// the *trace_enter()* call, which increases the indent when AND or OR are entered.
@@ -283,6 +226,9 @@ impl CharsNode {
     }
 
     fn return_1(&mut self, chars: &mut Peekable) {
+        for ch in self.limits.to_string().chars().rev() {
+            chars.put_back(ch);
+        }
         match self.blocks.pop() {
             Some(CharsContents::Special(ch)) => {
                 chars.put_back(ch);
@@ -352,51 +298,7 @@ impl CharsNode {
         else { panic!("trying to get CharsNode from wrong type") }
     }
 }    
-/*
-impl SpecialCharNode {
-    /// These characters have meaning when escaped, break for them. Otherwise just delete the '/' from the string
-    const ESCAPE_CODES: &str = "adntlu()|";
 
-    // called with pointer at a special character. Char can be '.' or "\*". For now I'm assuming this only gets called with special
-    // sequences at bat, so no checking is done.
-    /// Parses a special character from the front of the Peekable stream
-    fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { trace_enter("SPECIAL", chars); }
-        let special = match chars.peek_2() {
-            (Some('$'), _) | (Some('.'), _) => chars.next().unwrap(),
-            (Some('\\'), Some(ch)) => {
-                let _ = chars.next();       // parse out '\'
-                if SpecialCharNode::ESCAPE_CODES.contains(ch) {chars.next().unwrap()}
-                    // error return? ("undefined escape character")
-                else { return Ok(Node::None); }
-            },
-            _ => { return Ok(Node::None); }
-        };
-        Ok(Node::SpecialChar(SpecialCharNode { special, limits: Limits::parse(chars)?}).trace())
-    }
-
-    /// Checks a string to see if its head matches the contents of this node
-    fn matches(&self, string: &str) -> bool {
-        match string.chars().next() {
-            None => self.special == '$',            // match only end-of-string marker
-            Some(ch) => match self.special {
-                '.' => true,                        // all
-                'a' => (' '..='~').contains(&ch),   // ascii printable
-                'd' => ('0'..='9').contains(&ch),   // numeric
-                'n' => ch == '\n',                  // newline
-                'l' => ('a'..='z').contains(&ch),   // lc ascii
-                't' => ch == '\t',                  // tab
-                'u' => ('A'..='Z').contains(&ch),   // uc ascii
-                _ => false
-            }
-        }
-    }
-    fn desc(&self, indent: isize) -> String {
-        let slash = if ".$".contains(self.special) { "" } else { "\\" };
-        format!("{}SpecialCharNode: '{}{}'{}", pad(indent), slash, self.special, self.limits.simple_display())
-    }
-}
-*/
 impl SetNode {
     /// Parses a character set from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
@@ -521,9 +423,9 @@ impl OrNode {
         match parse(chars, true)? {
             (_, Node::Or(mut or_node)) => nodes.append(&mut or_node.nodes),
             (_, next_node) => nodes.push(next_node),
-//            (None, _) => panic!("Should not happen: following chars node cannot have overflow piece"),
         };
-        Ok((n0_p, Node::Or(OrNode {nodes, limits: Limits {min: 0, max: 0, lazy: false}}).trace()))
+        let len = nodes.len() - 1;
+        Ok((n0_p, Node::Or(OrNode {nodes, limits: Limits {min: 0, max: len, lazy: false}}).trace()))
     }
     
     /// recovers an OrNode from the Node::Ar enum
@@ -631,6 +533,7 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<(Option<Node>, Node), E
         (Some('\\'), Some('(')) => { chars.consume(2);  AndNode::parse_node(chars)? },
         (_, _) => CharsNode::parse_node(chars, if after_or { 1 } else { -1 })?,
     };
+    if node == Node::None { return Err(Error::make(9, format!("Parse error at \"{}\"", chars.front_string(6)).as_str()));}
     if let (Some('\\'), Some('|')) = chars.peek_2() {
         chars.consume(2);
         Ok(OrNode::parse_node(chars, node)?)
@@ -646,25 +549,26 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
     // hey, optimization
     // deosn't save that much time but makes the trace debug easier to read
     let root = {if let Node::And(r) = tree { r } else { return Err(Error::make(6, "Root of tree should be Node::And")); }};
-    /*
+
     if !root.anchor {
         if let Node::Chars(node_0) = &root.nodes[0] {
             if node_0.limits.min > 0 {
-                let copy = node_0.string.to_string();
-                match start.find(&copy) {
-                    Some(offset) => {
-                        if offset > 0 {
-                            if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", node_0.string, offset); }
-                            start = &start[offset..];
-                            start_pos = offset;
-                        }
-                    },
-                    None => { return Ok(None); }
+                if let CharsContents::Regular(str_0) = &node_0.blocks[0] {
+                    match start.find(str_0) {
+                        Some(offset) => {
+                            if offset > 0 {
+                                if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", str_0, offset); }
+                                start = &start[offset..];
+                                start_pos = offset;
+                            }
+                        },
+                        None => { return Ok(None); }
+                    }
                 }
             };
         }
     }
-*/
+
     while !start.is_empty() {
         if trace(1) {println!("\n==== WALK \"{}\" ====", start)};
         let path = tree.walk(start);
@@ -718,8 +622,19 @@ impl Default for Limits { fn default() -> Limits { Limits{min: 1, max: 1, lazy: 
 
 impl Limits {
     /// Display every Limit in a *{min, max}* format for debugging
-    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"L"} else {""})}
-
+    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"?"} else {""})}
+    fn to_string(&self) -> String {
+        let mut reps = match (self.min, self.max) {
+            (1, 1) => "".to_string(),
+            (0, 1) => "?".to_string(),
+            (0, EFFECTIVELY_INFINITE) => "*".to_string(),
+            (1, EFFECTIVELY_INFINITE) => "+".to_string(),
+            (min, EFFECTIVELY_INFINITE) => format!("{{{},}}", min),
+            (min, max) => { if min == max { format!("{{{},}}", min) } else {format!("{{{},}}", min)} },
+        };
+        if self.lazy { reps.push_str("?"); }
+        reps
+    }
     /// returns a Limit struct parsed out from point. If none is there returns the default
     /// Like parse_if() but always returns astruct, using the default if there is none in the string
     fn parse(chars: &mut Peekable) -> Result<Limits, Error> {
@@ -766,7 +681,6 @@ impl Limits {
     /// I considered subtracting 1 from the number to make it match, but because the arg is usize and is sometimes 0
     /// it is better to leave it like this.
     pub fn check(&self, num: usize) -> isize {
-        println!("LIMITS {:#?}, {}", self, num);
         if num <= self.min { -1 }
         else if num <= self.max + 1 { 0 }
         else { 1 }
@@ -971,6 +885,10 @@ impl<'a> Peekable<'a> {
     }
 
     fn consume(&mut self, num: usize) { for _i in 0..num { let _ = self.next(); } }
+
+    fn front_string(&mut self, len: usize) -> String {
+        self.peek_n(len).iter().filter_map(|x| *x).collect::<String>()
+    }
 }
 /// simple struct used to provide control on how errors are displayed
 #[derive(Debug)]
