@@ -77,8 +77,10 @@ const INTERACTIVE_DEFAULT: bool = false;
 const PRINTTREE_DEFAULT: bool = false;
 /// default value for the **--debug** switch
 const DEBUG_DEFAULT: u32 = 0;
-/// default value for the **--abbrev** switch
+/// default value for the **--Abbrev** switch
 const ABBREV_DEFAULT: u32 = 5;
+/// default value for the **--alt** switch
+const PARSER_DEFAULT: &str = "traditional";
 
 /// value for tab size: the number of spaces to indent for each level
 const TAB_SIZE:usize = 4;
@@ -141,8 +143,11 @@ pub struct Config {
     #[clap(short, long, default_value_t = DEBUG_DEFAULT, value_parser=value_parser!(u32).range(0..40))]
     pub debug: u32,
     // length of text to display in the --debug output
+    /// Prints debug information during the WALK phase. 1 - 4 give progressively more data
     #[clap(short, long, default_value_t = ABBREV_DEFAULT, value_parser=value_parser!(u32).range(1..))]
     pub abbrev: u32, 
+    #[clap(short, long, default_value_t = String::from(PARSER_DEFAULT))]
+    pub parser: String, 
 }
 
 impl Config {
@@ -150,7 +155,9 @@ impl Config {
     /// a _Config_ instance whose members provide the desired values, or an error if the values are not allowed.
     fn get() -> Result<Config, &'static str> {
         let config = Config::parse();
-        if config.interactive { Ok(config) }
+        if !"alternative".starts_with(&config.parser) && ! "traditional".starts_with(&config.parser) {
+            Err("Choices for parser are 'traditional' or 'alternative'")
+        } else if config.interactive { Ok(config) }
         else if config.re.is_empty() {
             Err("RE is required unless --interactive given")
         } else if config.text.is_empty() && !config.tree {
@@ -179,19 +186,20 @@ pub fn main() {
     crate::regexp::walk::set_abbrev_size(config.abbrev);
     
     if config.interactive { return Interactive::new(config).run(); }
-    
+    println!("RUNNING  '{}'  '{}'", config.re, config.text);
     set_trace(config.debug as usize);
     // execution starts
-    match regexp::parse_tree(&config.re) {
+    match regexp::parse_tree(&config.re, "alternative".starts_with(&config.parser)) {
         Err(error) => println!("{}", error),
         Ok(tree) => {
             if config.tree {
                 println!("--- Parse tree:");
                 tree.desc(0);
             }
+            println!("{:?}", config);
             if !config.text.is_empty() {
                 match regexp::walk_tree(&tree, &config.text) {
-                    Ok(Some((path, char_start, bytes_start))) => Report::new(&path, char_start, bytes_start).display(0),
+                    Ok(Some((path, char_start))) => Report::new(&path, char_start).display(0),
                     Ok(None) => println!("No match"),
                     Err(error) => println!("{}", error)
                 }
