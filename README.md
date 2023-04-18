@@ -29,6 +29,18 @@ a few week's rest I decided to give it a go.
 
 ## _RELEASE!_
 
+oops, maybe not. Further testing and adding a second parser (for my
+own, more rational RE language) caused a redesign where there is a
+state struct passed to each Step in the walk phase instead of a direct
+pointer to the string and its endpoint. This is much cleaner and makes
+the code easier to work with and understand - except it doesn't
+compile. There are currently two branches: **main**, which works but
+has a bug case and doesn't have the new parser, and **broken**, which
+doesn't compile, so I don't know of the new parser works and the bug
+is fixed. (I'm sure there are still a few more bugs to work out, but
+the logic should be there). Major thanks to anyone who can explain to
+me why the compile fails.
+
 I'm pleased to say it seems to be done. The basic program is working,
 the support environment - testing and documentation - is done, to some
 extent at least (I may add more tests). It even has some extra
