@@ -59,7 +59,7 @@ impl core::fmt::Debug for Node {
 
 impl Node {
     /// function that simply distributes a walk request to the proper XNode struct
-    fn walk<'a>(&'a self, matched: &'a Matched) -> walk::Path<'a> {
+    fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, matched),
             Node::Set(set_node) => walk::SetStep::walk(set_node, matched),
@@ -642,8 +642,8 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
 
     while !text.is_empty() {
         if trace(1) {println!("\n==== WALK \"{}\" ====", &text[start_pos..])}
-        let matched = Matched { string: text, start: start_pos, end: text.len() };
-        let path = tree.walk(&matched);
+        let matched = Matched { full_string: text, start: start_pos, end: start_pos };
+        let path = tree.walk(matched);
         if path.len() > 1 {
             if trace(1) { println!("--- Search succeeded ---") };
             return Ok(Some((path, char_bytes(text, start_pos))));
