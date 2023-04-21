@@ -390,11 +390,13 @@ impl SetNode {
     }
     
     /// Checks a string to see if its head matches the contents of this node
-    fn matches(&self, string: &str) -> bool {
-        match string.chars().next() {
-            Some(ch) => self.not != self.targets.iter().any(move |x| x.matches(ch)),
-            None => false
+    fn matches(&self, string: &str) -> Option<usize> {
+        if let Some(ch) = string.chars().next() {
+            if self.not != self.targets.iter().any(move |x| x.matches(ch)) {
+                return Some(char_bytes(string, 1));
+            }
         }
+        None
     }
     
     fn targets_string(&self) -> String {
@@ -640,9 +642,10 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
         }
     }
 
-    while !text.is_empty() {
+    let mut char_start = 0;
+    loop {
         if trace(1) {println!("\n==== WALK \"{}\" ====", &text[start_pos..])}
-        let matched = Matched { full_string: text, start: start_pos, end: start_pos };
+        let matched = Matched { full_string: text, start: start_pos, end: start_pos, char_start: char_start };
         let path = tree.walk(matched);
         if path.len() > 1 {
             if trace(1) { println!("--- Search succeeded ---") };
@@ -650,7 +653,12 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
         }
         if trace(1) {println!("==== WALK \"{}\": no match ====", &text[start_pos..])};
         if root.anchor { break; }
-        start_pos += 1;
+        if let Some(ch0) = text[start_pos..].chars().next() {
+            start_pos += String::from(ch0).len();
+            char_start += 1;
+        } else {
+            break;
+        }
     }
     Ok(None)
 }

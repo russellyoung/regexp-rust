@@ -199,7 +199,7 @@ pub fn main() {
             println!("{:?}", config);
             if !config.text.is_empty() {
                 match regexp::walk_tree(&tree, &config.text) {
-                    Ok(Some((path, char_start))) => Report::new(&path, char_start).display(0),
+                    Ok(Some((path, char_start))) => { println!("{:?}", path); Report::new(&path, char_start).display(0)},
                     Ok(None) => println!("No match"),
                     Err(error) => println!("{}", error)
                 }

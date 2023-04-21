@@ -173,7 +173,7 @@ fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
     print!("RUNNING '{}' '{}'... ", re, text);
     std::io::stdout().flush().unwrap();
     let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let (path, _, _) = walk_tree(&tree, text)
+    let (path, _) = walk_tree(&tree, text)
         .unwrap_or_else(|err| panic!("Expected \"{}\", got error '{}'", expected, err))
         .unwrap_or_else(|| panic!("Expected {}, found none", expected));
     assert_eq!(path.matched_string(), expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, path.matched_string());
@@ -305,8 +305,8 @@ fn former_bugs() {
 
 fn get_report<'a>(re: &'a str, text: &'a str, ) -> Report {
     let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let (path, start, b_start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
-    crate::regexp::Report::new(&path, start, b_start)
+    let (path, start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
+    crate::regexp::Report::new(&path, start, )
 }       
 fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (usize, usize), child_count: usize) {
     assert_eq!(report.found, expected);
