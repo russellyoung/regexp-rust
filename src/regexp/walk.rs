@@ -7,7 +7,6 @@ use super::*;
 use crate::{trace, trace_indent, trace_change_indent};
 
 /// simplifies code a little by removing the awkward accessing of the last element in a vector
-fn ref_last<T>(v: &Vec<T>) -> &T { &v[v.len() - 1] }
 
 //////////////////////////////////////////////////////////////////
 //
@@ -134,10 +133,10 @@ impl<'a> Path<'a> {
     // intended for internal use
     fn first_last(&self) -> (&Matched, &Matched) {
         match self {
-            Path::Chars(steps) =>    (&steps[0].matched, &ref_last(steps).matched),
-            Path::Set(steps) =>      (&steps[0].matched, &ref_last(steps).matched),
-            Path::And(steps) =>      (&steps[0].matched, &ref_last(steps).matched),
-            Path::Or(steps) =>       (&steps[0].matched, &ref_last(steps).matched),
+            Path::Chars(steps) =>    (&steps[0].matched, &steps.last().unwrap().matched),
+            Path::Set(steps) =>      (&steps[0].matched, &steps.last().unwrap().matched),
+            Path::And(steps) =>      (&steps[0].matched, &steps.last().unwrap().matched),
+            Path::Or(steps) =>       (&steps[0].matched, &steps.last().unwrap().matched),
             Path::None => panic!("NONE unexpected"),
         }
     }
@@ -413,7 +412,7 @@ impl<'a> CharsStep<'a> {
         let mut steps = vec![CharsStep {node, matched}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
-            match ref_last(&steps).step() {
+            match steps.last().unwrap().step() {
                 Some(s) => {
                     steps.push(s);
                     trace_pushing::<CharsStep>(steps.last().unwrap(), steps.len());
@@ -427,9 +426,11 @@ impl<'a> CharsStep<'a> {
     // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<CharsStep<'a>> {
-        if self.matched.end == self.matched.full_string.len() { return None; }
-        if let Some(size) = self.node.matches(self.matched.unterminated()) {
-            Some(CharsStep {node: self.node, matched: self.matched.next(size)})
+        let mut step = CharsStep {node: self.node, matched: self.matched.next(0)};
+        if step.matched.end == step.matched.full_string.len() { return None; }
+        if let Some(size) = step.node.matches(step.matched.unterminated()) {
+            step.matched.move_end(size as isize);
+            Some(step)
         } else { None }
     }
 
@@ -452,7 +453,7 @@ impl<'a> SetStep<'a> {
         let mut steps = vec![SetStep {node, matched}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
-            match ref_last(&steps).step() {
+            match steps.last().unwrap().step() {
                 Some(s) => {
                     trace_pushing::<SetStep>(&s, steps.len());
                     steps.push(s);
@@ -517,7 +518,7 @@ impl<'a> AndStep<'a> {
                 if trace(4) {
                     trace_change_indent(-1);
                     trace_indent();
-                    println!("new AND step: {:?}", step);
+                    println!("-- new step in AND: {:?}", step);
                     trace_change_indent(1);
                 }
             } else if step.back_off() {
@@ -528,7 +529,6 @@ impl<'a> AndStep<'a> {
             }
         }
         let (_, end) = step.child_paths.last().unwrap().range();
-        //step.matched.end = end;
         step.matched.set_end(end);
         Some(step)
     }
@@ -581,7 +581,7 @@ impl<'a> OrStep<'a> {
         let mut steps = vec![OrStep {node, matched, child_path: Box::new(Path::None), which: 0}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
-            if let Some(s) = ref_last(&steps).step() {
+            if let Some(s) = steps.last().unwrap().step() {
                 trace_pushing::<OrStep>(&s, steps.len());
                 steps.push(s);
             } else { break; }

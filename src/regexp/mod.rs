@@ -215,8 +215,12 @@ impl CharsContents {
                         'd' => ('0'..='9').contains(&ch),   // numeric
                         'n' => ch == '\n',                  // newline
                         'l' => ('a'..='z').contains(&ch),   // lc ascii
+                        'o' => ('0'..='7').contains(&ch),   // octal digit
                         't' => ch == '\t',                  // tab
                         'u' => ('A'..='Z').contains(&ch),   // uc ascii
+                        'x' => ('A'..='F').contains(&ch)    // hex digit
+                            || ('a'..='f').contains(&ch)
+                            || ('0'..='9').contains(&ch),
                         _ => false }
                     { return Some(char_bytes(text, 1)); }
                 } else if *special == '$' { return Some(0); }
@@ -717,7 +721,7 @@ fn alt_parse(chars: &mut Peekable) -> Result<Node, Error> {
 }
 
 impl CharsNode {
-    const ALT_ESCAPE_CODES: &str = "adntlu.$";
+    const ALT_ESCAPE_CODES: &str = "adntluxo.$";
     fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> { 
         if trace(2) { trace_enter("CHARS", chars); }
         let mut node = CharsNode { blocks: Vec::<CharsContents>::new(), limits: Limits::default(), named: None };
