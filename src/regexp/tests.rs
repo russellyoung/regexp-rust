@@ -1,4 +1,5 @@
 use crate::regexp::*;
+use std::io::Write;
 //
 // Initial tests are basic sanity tests for the tree parser. They are relatively simple because the
 // search tests (TODO) will provide more complete testing. These are intended mainly as a sanity check
@@ -71,10 +72,10 @@ fn limits_test() {
 // parser tests
 //
 fn make_chars_string(blocks: Vec<CharsContents>) -> Node {
-        Node::Chars(CharsNode{blocks, limits: Limits::default()})
+        Node::Chars(CharsNode{blocks, limits: Limits::default(), named: None})
 }
 fn make_chars_single(block: CharsContents, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Chars(CharsNode{blocks: vec![block], limits: Limits{min, max, lazy}})
+    Node::Chars(CharsNode{blocks: vec![block], limits: Limits{min, max, lazy}, named: None})
 }
 
 fn make_root<'a> (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
@@ -84,17 +85,15 @@ fn make_and<'a> (min: usize, max: usize, lazy: bool, name: Option<&'a str>) -> N
     Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, named, anchor: false})
 }
 fn make_or() -> Node {
-    Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default()})
+    Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default(), named: None})
 }
 
-fn make_set(not: bool, targets: Vec<Set>, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Set(SetNode{not, targets, limits: Limits{min, max, lazy}})
-}
-fn push_sets(set_node: &mut SetNode, sets: &mut Vec<Set>) {
-    set_node.targets.append(sets);
-}
-
-fn make_or_limits(node: &mut OrNode) { node.limits = Limits { min: 0, max: node.nodes.len() - 1, lazy: false }; }
+//fn make_set(not: bool, targets: Vec<SetUnit>, min: usize, max: usize, lazy: bool) -> Node {
+//    Node::SetUnit(SetNode{not, targets, limits: Limits{min, max, lazy}, named: None})
+//}
+//fn push_sets(set_node: &mut SetNode, sets: &mut Vec<Set>) {
+//    set_node.targets.append(sets);
+//}
 
 impl Node {
     fn push(&mut self, node: Node) {
@@ -113,11 +112,11 @@ impl Node {
 fn test_string_simple() {
     let mut node = make_root(1, 1, false);
     node.push(make_chars_string(vec![CharsContents::Regular("abcd".to_string())]));
-    assert_eq!(node, parse_tree("abcd").unwrap());
+    assert_eq!(node, parse_tree("abcd", false).unwrap());
 }
 
 #[test]
-fn test_string_embedded_reps() {
+fn test_string_embedded_reps_greedy() {
     let mut node = make_root(1, 1, false);
     node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
     node.push(make_chars_single(CharsContents::Regular("c".to_string()), 0, 1, false));
@@ -125,7 +124,7 @@ fn test_string_embedded_reps() {
     node.push(make_chars_single(CharsContents::Regular("f".to_string()), 1, EFFECTIVELY_INFINITE, false));
     node.push(make_chars_string(vec![CharsContents::Regular("gh".to_string())], ));
     node.push(make_chars_single(CharsContents::Regular("i".to_string()), 0, EFFECTIVELY_INFINITE, false));
-    assert_eq!(node, parse_tree("abc?def+ghi*").unwrap());
+    assert_eq!(node, parse_tree("abc?def+ghi*", false).unwrap());
 }
               
 #[test]
@@ -138,7 +137,7 @@ fn test_string_embedded_reps_lazy() {
     node.push(make_chars_string(vec![CharsContents::Regular("gh".to_string())]));
     node.push(make_chars_single(CharsContents::Regular("i".to_string()), 0, EFFECTIVELY_INFINITE, true));
     node.push(make_chars_string(vec![CharsContents::Regular("jk".to_string())]));
-    assert_eq!(node, parse_tree("abc??def+?ghi*?jk").unwrap());
+    assert_eq!(node, parse_tree("abc??def+?ghi*?jk", false).unwrap());
 }
 
 #[test]
@@ -149,36 +148,40 @@ fn or_with_chars_bug() {
     or_node.push(make_chars_string(vec![CharsContents::Regular("c".to_string())]));
     or_node.push(make_chars_string(vec![CharsContents::Regular("d".to_string())]));
 
-    make_or_limits(OrNode::mut_from_node(&mut or_node));
     node.push(or_node);
     node.push(make_chars_string(vec![CharsContents::Regular("ef".to_string())]));
-    assert_eq!(node, parse_tree(r"abc\|def").unwrap());
+    assert_eq!(node, parse_tree(r"abc\|def", false).unwrap());
 }
 
-#[test]
-fn set_basic() {
-    let mut node = make_root(1, 1, false);
-    node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
-    let targets = vec![Set::RegularChars("cde".to_string()),];
-    node.push(make_set(false, targets, 0, EFFECTIVELY_INFINITE, false));
-    node.push(make_chars_string(vec![CharsContents::Regular("fg".to_string())]));
-    let targets = vec![Set::RegularChars("h".to_string()),
-                       Set::Range('i', 'k'),
-                       Set::RegularChars("lm".to_string()),
-                       Set::SpecialChar('d')];
-    node.push(make_set(true, targets, 1, 1, false));
-    assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\d]").unwrap());
-}
+// #[test]
+// fn set_basic() {
+//     let mut node = make_root(1, 1, false);
+//     node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
+//     let targets = vec![Set::RegularChars("cde".to_string()),];
+//     node.push(make_set(false, targets, 0, EFFECTIVELY_INFINITE, false));
+//     node.push(make_chars_string(vec![CharsContents::Regular("fg".to_string())]));
+//     let targets = vec![Set::RegularChars("h".to_string()),
+//                        Set::Range('i', 'k'),
+//                        Set::RegularChars("lm".to_string()),
+//                        Set::SpecialChar('d')];
+//     node.push(make_set(true, targets, 1, 1, false));
+//     assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\d]", false).unwrap());
+// }
 
 
 fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
-    let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let (path, _, _) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("Expected \"{}\", didn't find anything", expected)).unwrap();
+    print!("RUNNING '{}' '{}'... ", re, text);
+    std::io::stdout().flush().unwrap();
+    let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    let (path, _) = walk_tree(&tree, text)
+        .unwrap_or_else(|err| panic!("Expected \"{}\", got error '{}'", expected, err))
+        .unwrap_or_else(|| panic!("Expected {}, found none", expected));
     assert_eq!(path.matched_string(), expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, path.matched_string());
+    println!("OK");
 }       
         
 fn not_find<'a>(re: &'a str, text: &'a str) {
-    let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
     assert!(walk_tree(&tree, text).unwrap().is_none(), "re \"{}\" expected no match, found one", re);
 }       
 
@@ -203,6 +206,10 @@ fn rep_chars() {
     find("abc{2}d", "abccdz", "abccd");
     not_find("abc{2}d", "abcccdz");
     find("abc{2,3}d", "abcccdz", "abcccd");
+    find(r"a\d*\|b*c", "aacc", "ac");
+    find(r"a\d*\|b*c", "aabbbcc", "abbbc");
+    find(r"a\d*\|b*c", "a12c", "a12c");
+    not_find(r"a\d*\|b*c", "aa1bcc");
 }
     
 #[test]
@@ -234,23 +241,23 @@ fn special_chars() {
     find(r"\a\u+", "你好abCD没有", "bCD");
 }
     
-#[test]
-fn set_chars() {
-    find(r"[abc]+", "xabacaacd", "abacaac");
-    find(r"z[abc]*z", "abzzcd", "zz");
-    find(r"z[abc]*z", "abzaabczcd", "zaabcz");
-    not_find(r"z[abc]*z", "abzaabcdzcd");
-    find(r"z[a-m]*z", "abzabclmzxx", "zabclmz");
-    find(r"[a-mz]+", "xyzabclmzxx", "zabclmz");
-}
+// #[test]
+// fn set_chars() {
+//     find(r"[abc]+", "xabacaacd", "abacaac");
+//     find(r"z[abc]*z", "abzzcd", "zz");
+//     find(r"z[abc]*z", "abzaabczcd", "zaabcz");
+//     not_find(r"z[abc]*z", "abzaabcdzcd");
+//     find(r"z[a-m]*z", "abzabclmzxx", "zabclmz");
+//     find(r"[a-mz]+", "xyzabclmzxx", "zabclmz");
+// }
 
-#[test]
-fn non_set_chars() {
-    find("a[^hgf]*", "aabcdefghij", "aabcde");
-    find("a[^e-m]*", "aabcdefghij", "aabcd");
-    find("a[^-e-m]*", "xab-cdefghij", "ab");
-    not_find("[^abcd]+", "abcdab");
-}
+// #[test]
+// fn non_set_chars() {
+//     find("a[^hgf]*", "aabcdefghij", "aabcde");
+//     find("a[^e-m]*", "aabcdefghij", "aabcd");
+//     find("a[^-e-m]*", "xab-cdefghij", "ab");
+//     not_find("[^abcd]+", "abcdab");
+// }
 
 #[test]
 fn or() {
@@ -272,8 +279,6 @@ fn or() {
     not_find(r"x\(abc\)\|de", "xxxabeyy");
     find(r"x\(abc\)+\|\(de\)*d", "xxxabcabcd", "xabcabcd");
     find(r"x\(abc\)+\|\(de\)*d", "xxxdedededx", "xdededed");
-    // this one caught a bug
-    find(r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
 }
 
 #[test]
@@ -292,11 +297,16 @@ fn lazy() {
     find(r"ab+?c", "abbbbbc", "abbbbbc");     // lazy back off
 }
 
+#[test]
+fn former_bugs() {
+    find(r"\(de\)*d", "dededede", "dededed");
+    find(r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
+}
 
 fn get_report<'a>(re: &'a str, text: &'a str, ) -> Report {
-    let tree = parse_tree(re).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let (path, start, b_start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap();
-    crate::regexp::Report::new(&path, start, b_start)
+    let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    let (path, start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
+    crate::regexp::Report::new(&path, start, )
 }       
 fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (usize, usize), child_count: usize) {
     assert_eq!(report.found, expected);
@@ -371,7 +381,7 @@ fn reports() {
 // error tests
 //
 fn e_check(re: &str, ecode: usize) {
-    match parse_tree(re) {
+    match parse_tree(re, false) {
         Ok(_) => panic!("Expected error {} parsing \"{}\", didn't get it", ecode, re),
         Err(error) => assert!(error.code == ecode, "Parsing \"{}\", expected error {}, found error {} ({})", re, ecode, error.code, error.msg),
     }
