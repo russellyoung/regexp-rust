@@ -43,7 +43,7 @@ const EFFECTIVELY_INFINITE: usize = 99999999;
 /// Node acts as a common wrapper for the different XNode struct types: CharsNode, SpecialCharNode, SetNode, AndNode, and OrNode.
 /// Besides serving as a common strcut to distribute message requests, it also behaves like Box in providing a place in memory for the structures to live.
 #[derive(PartialEq)]
-pub enum Node {Chars(CharsNode), And(AndNode), Or(OrNode), Set(SetNode), None, }
+pub enum Node {Chars(CharsNode), And(AndNode), Or(OrNode), /*Set(SetNode),*/ None, }
 
 impl core::fmt::Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -51,7 +51,7 @@ impl core::fmt::Debug for Node {
             Node::Chars(a)       => a.fmt(f),
             Node::And(a)         => a.fmt(f),
             Node::Or(a)          => a.fmt(f),
-            Node::Set(a)         => a.fmt(f),
+//            Node::Set(a)         => a.fmt(f),
             Node::None           => write!(f, "None")
         }
     }
@@ -62,7 +62,7 @@ impl Node {
     fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, matched),
-            Node::Set(set_node) => walk::SetStep::walk(set_node, matched),
+//            Node::Set(set_node) => walk::SetStep::walk(set_node, matched),
             Node::And(and_node) => walk::AndStep::walk(and_node, matched),
             Node::Or(or_node) => walk::OrStep::walk(or_node, matched),
             Node::None => panic!("NONE node should not be in final tree")
@@ -75,7 +75,7 @@ impl Node {
             Node::Chars(a)       => a.desc(indent),
             Node::And(a)         => a.desc(indent),
             Node::Or(a)          => a.desc(indent),
-            Node::Set(a)         => a.desc(indent),
+//            Node::Set(a)         => a.desc(indent),
             Node::None           => print!("{0:1$}", "None", indent),
         }
     }
@@ -85,7 +85,7 @@ impl Node {
             Node::Chars(a)       => a.named = named,
             Node::And(a)         => a.named = named,
             Node::Or(a)          => a.named = named,
-            Node::Set(a)         => a.named = named,
+//            Node::Set(a)         => a.named = named,
             Node::None           => panic!("No name for None node"),
         };
     }
@@ -95,7 +95,7 @@ impl Node {
             Node::Chars(a)       => &a.named,
             Node::And(a)         => &a.named,
             Node::Or(a)          => &a.named,
-            Node::Set(a)         => &a.named,
+//            Node::Set(a)         => &a.named,
             Node::None           => panic!("No name for None node"),
         }
     }
@@ -105,7 +105,7 @@ impl Node {
             Node::Chars(a)       => a.limits = limits,
             Node::And(a)         => a.limits = limits,
             Node::Or(a)          => a.limits = limits,
-            Node::Set(a)         => a.limits = limits,
+//            Node::Set(a)         => a.limits = limits,
             Node::None           => panic!("No limits for None node"),
         };
     }
@@ -174,13 +174,13 @@ pub struct OrNode {
 }
 
 /// handles [a-z] style matches. This node represents a branch in the parse tree
-#[derive(Default, PartialEq)]
-pub struct SetNode {
-    limits: Limits,
-    targets: Vec<Set>,
-    not: bool,
-    named: Option<String>,
-}
+// #[derive(Default, PartialEq)]
+// pub struct SetNode {
+//     limits: Limits,
+//     targets: Vec<SetUnit>,
+//     not: bool,
+//     named: Option<String>,
+// }
 
 //////////////////////////////////////////////////////////////////
 //
@@ -192,7 +192,7 @@ pub struct SetNode {
 //////////////////////////////////////////////////////////////////
 
 #[derive(Debug, PartialEq)]
-enum CharsContents {Regular(String), Special(char)}
+enum CharsContents {Regular(String), Special(char), Set(bool, Vec<SetUnit>), }
 impl Default for CharsContents { fn default() -> CharsContents { CharsContents::Regular("".to_string()) }}
 
 impl CharsContents {
@@ -224,7 +224,14 @@ impl CharsContents {
                         _ => false }
                     { return Some(char_bytes(text, 1)); }
                 } else if *special == '$' { return Some(0); }
-            }
+            },
+            CharsContents::Set(not, targets) => {
+                if let Some(ch) = text.chars().next() {
+                    if *not != targets.iter().any(|x|x.matches(ch)) {
+                        return Some(char_bytes(text, 1));
+                    }
+                }
+            },
         }
         None
     }
@@ -234,7 +241,9 @@ impl CharsContents {
             CharsContents::Regular(string) => string.clone(),
             CharsContents::Special(special) => {
                 let slash = if CharsNode::ESCAPE_CODES.contains(*special) { r"\" } else { "" };
-                format!("<{}{}>", slash, special) }
+                format!("{}{}", slash, special) }
+            CharsContents::Set(not, targets) => 
+                format!("[{}{}]", if *not {&"^"} else {&""}, targets.iter().map(|x| x.desc()).collect::<String>()),
         }
     }
 }
@@ -262,9 +271,8 @@ impl CharsNode {
                 (Some('\\'), Some('|')) |
                 (Some('\\'), Some(')')) => { break; },
                 (Some('\\'), Some(ch1)) => node.push_char(chars.consume(1), CharsNode::ESCAPE_CODES.contains(ch1)),
-                (Some('['), _) => { break; },
-                (Some('.'), _) |
-                (Some('$'), _) => node.push_char(chars, true),
+                (Some('['), _) => node.blocks.push(SetUnit::parse(chars.consume(1))?),
+                (Some('.'), _) | (Some('$'), _) => node.push_char(chars, true),
                 (Some(_), _) => node.push_char(chars, false),
                 _ => panic!("peek_n(3) should return exactly 3 values"),
             }
@@ -278,25 +286,17 @@ impl CharsNode {
         }
         Ok(Node::Chars(node).trace())
     }
-
+    
     fn return_1(&mut self, chars: &mut Peekable) {
-        for ch in self.limits.to_string().chars().rev() {
-            chars.put_back(ch);
-        }
         match self.blocks.pop() {
-            Some(CharsContents::Special(ch)) => {
-                chars.put_back(ch);
-                if !".$".contains(ch) { 
-                    chars.put_back('\\');
+            Some(CharsContents::Regular(mut text)) => {
+                chars.put_back(text.pop().unwrap());
+                if !text.is_empty() {
+                    self.blocks.push(CharsContents::Regular(text));
                 }
             },
-            Some(CharsContents::Regular(mut string)) => {
-                chars.put_back(string.pop().unwrap());
-                if !string.is_empty() {
-                    self.blocks.push(CharsContents::Regular(string));
-                }
-            },
-            None => panic!("There should always be a block here"),
+            Some(contents) => { chars.put_back_str(contents.repr().as_str()); },
+            _ => ()
         }
     }
 
@@ -311,20 +311,21 @@ impl CharsNode {
         if special { self.blocks.push(CharsContents::Special(chars.next().unwrap())); }
         else if let Some(cur_block) = self.blocks.pop() {
             match cur_block {
-                CharsContents::Special(_) => {
+                CharsContents::Special(_) |
+                CharsContents::Set(_, _) => {
                     self.blocks.push(cur_block);
                     self.blocks.push(CharsContents::Regular(chars.next().unwrap().to_string()));
                 },
                 CharsContents::Regular(mut string) => {
                     string.push(chars.next().unwrap());
                     self.blocks.push(CharsContents::Regular(string));
-                }
+                },
             }
         } else {
             self.blocks.push(CharsContents::Regular(chars.next().unwrap().to_string()));
         }
     }
-    
+
     /// Checks a string to see if its head matches the contents of this node
     fn matches(&self, string: &str) -> Option<usize> {
         let mut total_len = 0;
@@ -354,16 +355,17 @@ impl CharsNode {
     }
 }    
 
-impl Debug for SetNode {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let name = match &self.named {
-            Some(name) => format!("<{}>", name,),
-            None => "".to_string(),
-        };
-        write!(f, "SetNode{}: '{}'{}", name, self.targets_string(), self.limits.simple_display(), )
-    }
-}
+// impl Debug for SetNode {
+//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+//         let name = match &self.named {
+//             Some(name) => format!("<{}>", name,),
+//             None => "".to_string(),
+//         };
+//         write!(f, "SetNode{}: '{}'{}", name, self.targets_string(), self.limits.simple_display(), )
+//     }
+// }
     
+/*
 impl SetNode {
     /// Parses a character set from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
@@ -412,6 +414,102 @@ impl SetNode {
         println!("{:?}", self);
     }
 }    
+*/
+/// Used to represent the characters in a SET (represented in the RE by "[a-mxyz]" or "[^\da-g]"
+#[derive(Debug,PartialEq)]
+enum SetUnit {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
+
+impl SetUnit {
+    fn desc(&self) -> String {
+        match self {
+            SetUnit::RegularChars(string) => string.to_string(),
+            SetUnit::SpecialChar(ch) => {
+                let esc = if CharsNode::ESCAPE_CODES.contains(*ch) {"\\"} else {""};
+                format!("{}{}", esc, ch)
+            },
+            SetUnit::Range(ch0, ch1) => format!("{}-{}", ch0, ch1),
+            SetUnit::Empty => "*EMPTY*".to_string(),
+        }
+    }
+
+    fn parse(chars: &mut Peekable) -> Result<CharsContents, Error> {
+        let not = if let Some('^') = chars.peek() {
+            chars.consume(1);
+            true
+        } else { false };
+        let mut sets = Vec::<SetUnit>::new();
+        let mut chs = Vec::<char>::new();
+        let mut in_range: bool = false;
+        loop {
+            match (chars.next(), chars.peek()) {
+                (Some(']'), _) => { break;},
+                (Some('\\'), Some(ch)) => {
+                    chars.consume(1);
+                    if CharsNode::ESCAPE_CODES.contains(ch) {
+                        in_range = false;
+                        sets.push(SetUnit::SpecialChar(chars.next().unwrap()));
+                    } else if in_range {
+                        if let Some(ch0) = chs.pop() {
+                            sets.push(SetUnit::Range(ch0, ch));
+                        } else { chs.push('-'); }
+                        in_range = false;
+                    } else { chs.push(ch); }
+                },
+                (Some('-'), _) => in_range = true,
+                (Some(ch), _) => {
+                    if in_range {
+                        if let Some(ch0) = chs.pop() {
+                            sets.push(SetUnit::Range(ch0, ch));
+                        } else { chs.push('-'); }
+                        in_range = false;
+                    } else {
+                        chs.push(ch);
+                    }
+                },
+                (_, _) => { return Err(Error::make(8, "unterminated range"))},
+            }
+        }
+        if !chs.is_empty() {
+            sets.push(SetUnit::RegularChars(chs.into_iter().collect()));
+        }
+        Ok(CharsContents::Set(not, sets))
+    }
+    
+    fn parse_next(chars: &mut Peekable) -> Result<SetUnit, Error> {
+        let peeks = chars.peek_n(3);
+        Ok(match (peeks[0], peeks[1], peeks[2]) {
+            (Some(ch0), Some(ch1), Some(_ch2)) => {
+                if ch1 == '-'{
+                    SetUnit::Range(chars.next().unwrap(), (chars.next(), chars.next().unwrap()).1)
+                } else if ch0 == '\\' {
+                    SetUnit::SpecialChar((chars.next(), chars.next()).1.unwrap())
+                } else {
+                    let mut string = "".to_string();
+                    loop {
+                        match chars.peek_2() {
+                            (Some(ch0), Some(ch1)) => {
+                                if ch0 == ']' || ch0 == '\\' || ch1 == '-' { break; }
+                                string.push(chars.next().unwrap());
+                            },
+                            _ => { return Err(Error::make(4, "Unterminated set block"));},
+                        }
+                    }
+                    if string.is_empty() {SetUnit::Empty} else {SetUnit::RegularChars(string)}
+                }
+            }
+            _ => {return Err(Error::make(4, "Unterminated set block"));},
+        })
+    }
+    /// Checks a string to see if its head matches the contents of this node
+    fn matches(&self, ch: char) -> bool {
+        match self {
+            SetUnit::RegularChars(string) => string.contains(ch),
+            SetUnit::SpecialChar(_ch) => false,   // TODO
+            SetUnit::Range(ch0, ch1) => *ch0 <= ch && ch <= *ch1,
+            SetUnit::Empty => false,
+        }
+    }
+}
 
 impl Debug for AndNode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -524,56 +622,6 @@ impl OrNode {
     }
 }
 
-// TODO: maybe combine single chars into String so can use contains() to ge all at once?
-/// Used to represent the characters in a SET (represented in the RE by "[a-mxyz]" or "[^\da-g]"
-#[derive(Debug,PartialEq)]
-enum Set {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
-
-impl Set {
-    fn desc(&self) -> String {
-        match self {
-            Set::RegularChars(string) => string.to_string(),
-            Set::SpecialChar(ch) => format!("\\{}", ch),
-            Set::Range(ch0, ch1) => format!("{}-{}", ch0, ch1),
-            Set::Empty => "*EMPTY*".to_string(),
-        }
-    }
-    
-    fn parse_next(chars: &mut Peekable) -> Result<Set, Error> {
-        let peeks = chars.peek_n(3);
-        Ok(match (peeks[0], peeks[1], peeks[2]) {
-            (Some(ch0), Some(ch1), Some(_ch2)) => {
-                if ch1 == '-'{
-                    Set::Range(chars.next().unwrap(), (chars.next(), chars.next().unwrap()).1)
-                } else if ch0 == '\\' {
-                    Set::SpecialChar((chars.next(), chars.next()).1.unwrap())
-                } else {
-                    let mut string = "".to_string();
-                    loop {
-                        match chars.peek_2() {
-                            (Some(ch0), Some(ch1)) => {
-                                if ch0 == ']' || ch0 == '\\' || ch1 == '-' { break; }
-                                string.push(chars.next().unwrap());
-                            },
-                            _ => { return Err(Error::make(4, "Unterminated set block"));},
-                        }
-                    }
-                    if string.is_empty() {Set::Empty} else {Set::RegularChars(string)}
-                }
-            }
-            _ => {return Err(Error::make(4, "Unterminated set block"));},
-        })
-    }
-    /// Checks a string to see if its head matches the contents of this node
-    fn matches(&self, ch: char) -> bool {
-        match self {
-            Set::RegularChars(string) => string.contains(ch),
-            Set::SpecialChar(_ch) => false,   // TODO
-            Set::Range(ch0, ch1) => *ch0 <= ch && ch <= *ch1,
-            Set::Empty => false,
-        }
-    }
-}
 
 //////////////////////////////////////////////////////////////////
 //
@@ -609,7 +657,7 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
 fn parse(chars: &mut Peekable, after_or: bool) -> Result<(Option<Node>, Node), Error> {
     let node = match chars.peek_2() {
         (None, _) => Node::None,
-        (Some('['), _) => SetNode::parse_node(chars.consume(1))?,
+//        (Some('['), _) => SetNode::parse_node(chars.consume(1))?,
         (Some('\\'), Some('(')) => AndNode::parse_node(chars.consume(2))?,
         (_, _) => CharsNode::parse_node(chars, if after_or { 1 } else { -1 })?,
     };
@@ -709,7 +757,7 @@ fn alt_parse(chars: &mut Peekable) -> Result<Node, Error> {
         [Some('a'), Some('n'), Some('d'), Some('(')] => AndNode::alt_parse_node(chars.consume(4))?,
         [Some('o'), Some('r'), Some('('), _] => OrNode::alt_parse_node(chars.consume(3))?,
         [Some('"'), _, _, _] => CharsNode::alt_parse_node(chars.consume(1))?,
-        [Some('['), _, _, _] => SetNode::alt_parse_node(chars.consume(1))?,
+//        [Some('['), _, _, _] => SetNode::alt_parse_node(chars.consume(1))?,
         _ => return Err(Error::make(101, format!("Unexpected chars in regular expression: \"{}\"", chars.preview(6)).as_str()))
     };
     node.set_named(alt_parse_named(chars)?);
@@ -738,12 +786,12 @@ impl CharsNode {
     }
 
 }
-
+/*
 impl SetNode {
     /// Parses a character set from the front of the Peekable stream
     fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> { 
         if trace(2) { trace_enter("SET", chars); }
-        let mut targets = Vec::<Set>::new();
+        let mut targets = Vec::<SetUnit>::new();
         let mut not = false;
         if chars.peek() == Some('^') {
             chars.consume(1);
@@ -754,8 +802,8 @@ impl SetNode {
                 Some(']') => { break; }
                 None => { return Err(Error::make(3, "Unterminated Set")); },
                 Some(_ch) => {
-                    let target = Set::parse_next(chars)?; 
-                    if target != Set::Empty {targets.push(target) }
+                    let target = SetNode::parse_next(chars)?; 
+                    if target != SetNode::Empty {targets.push(target) }
                 },
             }
         }
@@ -764,7 +812,7 @@ impl SetNode {
         else { Ok(Node::Set( SetNode {targets, not, limits: Limits::parse(chars)?, named: None}).trace()) }
     }
 }
-
+*/
 impl AndNode {
     /// Recursively parses an AND node from the front of the Peekable stream
     fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> {
@@ -1083,6 +1131,13 @@ impl<'a> Peekable<'a> {
     pub fn put_back(&mut self, ch: char) {
         self.progress_check -= 1;
         self.peeked.insert(0, ch);
+    }
+
+    pub fn put_back_str(&mut self, string: &str) {
+        self.progress_check -= 1;
+        for ch in string.chars().rev() {
+            self.peeked.insert(0, ch);
+        }
     }
 
     /// pushed a char onto the back of the **Peekable** stream

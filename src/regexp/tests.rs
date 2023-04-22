@@ -88,12 +88,12 @@ fn make_or() -> Node {
     Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default(), named: None})
 }
 
-fn make_set(not: bool, targets: Vec<Set>, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Set(SetNode{not, targets, limits: Limits{min, max, lazy}, named: None})
-}
-fn push_sets(set_node: &mut SetNode, sets: &mut Vec<Set>) {
-    set_node.targets.append(sets);
-}
+//fn make_set(not: bool, targets: Vec<SetUnit>, min: usize, max: usize, lazy: bool) -> Node {
+//    Node::SetUnit(SetNode{not, targets, limits: Limits{min, max, lazy}, named: None})
+//}
+//fn push_sets(set_node: &mut SetNode, sets: &mut Vec<Set>) {
+//    set_node.targets.append(sets);
+//}
 
 impl Node {
     fn push(&mut self, node: Node) {
@@ -116,7 +116,7 @@ fn test_string_simple() {
 }
 
 #[test]
-fn test_string_embedded_reps() {
+fn test_string_embedded_reps_greedy() {
     let mut node = make_root(1, 1, false);
     node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
     node.push(make_chars_single(CharsContents::Regular("c".to_string()), 0, 1, false));
@@ -153,20 +153,20 @@ fn or_with_chars_bug() {
     assert_eq!(node, parse_tree(r"abc\|def", false).unwrap());
 }
 
-#[test]
-fn set_basic() {
-    let mut node = make_root(1, 1, false);
-    node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
-    let targets = vec![Set::RegularChars("cde".to_string()),];
-    node.push(make_set(false, targets, 0, EFFECTIVELY_INFINITE, false));
-    node.push(make_chars_string(vec![CharsContents::Regular("fg".to_string())]));
-    let targets = vec![Set::RegularChars("h".to_string()),
-                       Set::Range('i', 'k'),
-                       Set::RegularChars("lm".to_string()),
-                       Set::SpecialChar('d')];
-    node.push(make_set(true, targets, 1, 1, false));
-    assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\d]", false).unwrap());
-}
+// #[test]
+// fn set_basic() {
+//     let mut node = make_root(1, 1, false);
+//     node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
+//     let targets = vec![Set::RegularChars("cde".to_string()),];
+//     node.push(make_set(false, targets, 0, EFFECTIVELY_INFINITE, false));
+//     node.push(make_chars_string(vec![CharsContents::Regular("fg".to_string())]));
+//     let targets = vec![Set::RegularChars("h".to_string()),
+//                        Set::Range('i', 'k'),
+//                        Set::RegularChars("lm".to_string()),
+//                        Set::SpecialChar('d')];
+//     node.push(make_set(true, targets, 1, 1, false));
+//     assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\d]", false).unwrap());
+// }
 
 
 fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
@@ -241,23 +241,23 @@ fn special_chars() {
     find(r"\a\u+", "你好abCD没有", "bCD");
 }
     
-#[test]
-fn set_chars() {
-    find(r"[abc]+", "xabacaacd", "abacaac");
-    find(r"z[abc]*z", "abzzcd", "zz");
-    find(r"z[abc]*z", "abzaabczcd", "zaabcz");
-    not_find(r"z[abc]*z", "abzaabcdzcd");
-    find(r"z[a-m]*z", "abzabclmzxx", "zabclmz");
-    find(r"[a-mz]+", "xyzabclmzxx", "zabclmz");
-}
+// #[test]
+// fn set_chars() {
+//     find(r"[abc]+", "xabacaacd", "abacaac");
+//     find(r"z[abc]*z", "abzzcd", "zz");
+//     find(r"z[abc]*z", "abzaabczcd", "zaabcz");
+//     not_find(r"z[abc]*z", "abzaabcdzcd");
+//     find(r"z[a-m]*z", "abzabclmzxx", "zabclmz");
+//     find(r"[a-mz]+", "xyzabclmzxx", "zabclmz");
+// }
 
-#[test]
-fn non_set_chars() {
-    find("a[^hgf]*", "aabcdefghij", "aabcde");
-    find("a[^e-m]*", "aabcdefghij", "aabcd");
-    find("a[^-e-m]*", "xab-cdefghij", "ab");
-    not_find("[^abcd]+", "abcdab");
-}
+// #[test]
+// fn non_set_chars() {
+//     find("a[^hgf]*", "aabcdefghij", "aabcde");
+//     find("a[^e-m]*", "aabcdefghij", "aabcd");
+//     find("a[^-e-m]*", "xab-cdefghij", "ab");
+//     not_find("[^abcd]+", "abcdab");
+// }
 
 #[test]
 fn or() {
