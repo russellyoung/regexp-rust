@@ -36,13 +36,6 @@ pub struct CharsStep<'a> {
     matched: Matched<'a>,
 }
 
-/// Represents a single step for a SetNode (characters belonging to a defined set, like [a-z .,]
-// pub struct SetStep<'a> {
-//     /// The node from phase 1
-//     node: &'a SetNode,
-//     matched: Matched<'a>,
-// }
-
 /// Represents a single step for an AndNode (a collection of 0 or more nodes that all must match)
 pub struct AndStep<'a> {
     /// The node from phase 1
@@ -94,7 +87,6 @@ impl<'a> Path<'a> {
     pub fn len(&self) -> usize {
         match self {
             Path::Chars(steps) => steps.len(),
-//            Path::Set(steps)   => steps.len(),
             Path::And(steps)   => steps.len(),
             Path::Or(steps)    => steps.len(),
             Path::None => 0,
@@ -123,7 +115,6 @@ impl<'a> Path<'a> {
     pub fn limits(&self) -> Limits {
         match self {
             Path::Chars(steps) =>    steps[0].node.limits,
-//            Path::Set(steps) =>      steps[0].node.limits,
             Path::And(steps) =>      steps[0].node.limits,
             Path::Or(steps) =>       steps[0].node.limits,
             Path::None =>            panic!("Accessign limits() of None node"),
@@ -134,7 +125,6 @@ impl<'a> Path<'a> {
     fn first_last(&self) -> (&Matched, &Matched) {
         match self {
             Path::Chars(steps) =>    (&steps[0].matched, &steps.last().unwrap().matched),
-//            Path::Set(steps) =>      (&steps[0].matched, &steps.last().unwrap().matched),
             Path::And(steps) =>      (&steps[0].matched, &steps.last().unwrap().matched),
             Path::Or(steps) =>       (&steps[0].matched, &steps.last().unwrap().matched),
             Path::None => panic!("NONE unexpected"),
@@ -184,11 +174,6 @@ impl<'a> Path<'a> {
                 if trace(5) {trace_indent(); println!("popping off {:?}", x); }
                 x.matched.len()
             },
-//            Path::Set(steps) => {
-//                let x = steps.pop().unwrap();
-//                if trace(5) {trace_indent(); println!("popping off {:?}", x); }
-//                x.matched.len()
-//            },
             Path::And(steps) => {
                 let x = steps.pop().unwrap();
                 if trace(5) {trace_indent(); println!("popping off {:?}", x); }
@@ -215,12 +200,6 @@ impl<'a> Path<'a> {
                     steps.push(step);
                 }
             },
-            // Path::Set(steps) => {
-            //     if let Some(step) = steps[steps.len() - 1].step() {
-            //         match_len = step.matched.len() as isize;
-            //         steps.push(step);
-            //     }
-            // },
             Path::And(steps) => {
                 let len = steps.len();
                 if let Some(step) = steps[len - 1].step() {
@@ -278,16 +257,6 @@ impl<'a> Path<'a> {
                     if !subreport.name.is_none() { reports.push(subreport); }
                 }
             },
-            // Path::Set(steps) => {
-            //     let mut iter = steps.iter();
-            //     // There is an entry for 0 in the list, if there are others pop them off
-            //     if steps.len() > 1 { let _ = iter.next(); }
-            //     for step in iter {
-            //         let (subreport, pos) = step.make_report(char_pos);
-            //         char_pos = pos;
-            //         if !subreport.name.is_none() { reports.push(subreport); }
-            //     }
-            // },
             Path::None => panic!("Should not be any None path when compiling report"),
         }
         (reports, char_pos)
@@ -340,12 +309,6 @@ impl<'a> Debug for CharsStep<'a> {
         write!(f, "{{{:?}}}, string {} len {}", self.node, self.matched.abbrev(), self.matched.len())
     }
 }
-
-// impl<'a> Debug for SetStep<'a> {
-//     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-//         write!(f, "{{{:?}}}, string {} len {}", self.node, self.matched.abbrev(), self.matched.len())
-//     }
-// }
 
 impl<'a> Debug for AndStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -447,44 +410,6 @@ impl<'a> CharsStep<'a> {
     }
 }
 
-// impl<'a> SetStep<'a> {
-//     /// start a Path using a set to match, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-//     pub fn walk(node: &'a SetNode, matched: Matched<'a>) -> Path<'a> {
-//         let mut steps = vec![SetStep {node, matched}];
-//         trace_start_walk(&steps);
-//         for _i in 1..=node.limits.initial_walk_limit() {
-//             match steps.last().unwrap().step() {
-//                 Some(s) => {
-//                     trace_pushing::<SetStep>(&s, steps.len());
-//                     steps.push(s);
-//                 },
-//                 None => { break; }
-//             }
-//         }
-//         trace_end_walk(Path::Set(steps))
-//     }
-//     /// try to take a single step over a set of characters
-//     fn step(&self) -> Option<SetStep<'a>> {
-//         if let Some(len) = self.node.matches(self.matched.remainder()) {
-//             Some(SetStep {node: self.node, matched: self.matched.next(len as usize)})
-//         } else {
-//             None
-//         }
-//     }
-
-//     /// Compiles a **Report** object from this path and its children after a successful search
-//     fn make_report(&self, char_start: usize) -> (Report, usize) {
-//         let matched_string = self.matched.string();
-//         let char_len = self.matched.len_chars();
-//         (Report {found: matched_string.to_string(),
-//                  name: self.node.named.clone(),
-//                  pos: (char_start, char_start + char_len),
-//                  bytes: (self.matched.start, self.matched.end),
-//                  subreports: Vec::<Report>::new()},
-//          char_start + char_len)
-//     }
-// }
-
 impl<'a> AndStep<'a> {
     /// start a Path using an And node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a AndNode, matched: Matched<'a>) -> Path<'a> {
@@ -556,7 +481,6 @@ impl<'a> AndStep<'a> {
     
     /// Compiles a **Report** object from this path and its children after a successful search
     fn make_report(&self, char_start: usize) -> (Report, usize) {
-//        println!("reporting on {:#?}", self);
         let mut reports = Vec::<Report>::new();
         let mut char_end = char_start;
         for p in &self.child_paths {
@@ -610,14 +534,9 @@ impl<'a> OrStep<'a> {
             println!("new OR step: {:?}", step);
             trace_change_indent(1);
         }
-//        println!("xxxx {:#?}", step.child_path);
         Some(step)
     }
 
-    // return value:
-    // - 0: failed
-    // - 1: branch failed, try the next one
-    // - 2: succeeded
     fn back_off(&mut self) -> bool {
         if let Some(len) = self.child_path.pop() {
             //self.matched.end = (self.matched.end as isize - len) as usize;

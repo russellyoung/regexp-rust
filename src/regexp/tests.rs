@@ -260,7 +260,7 @@ fn special_chars() {
 // }
 
 #[test]
-fn or() {
+fn basic_or() {
     find(r"abc\|de", "xxxabceyy", "abce");
     find(r"abc\|de", "xxxabdeyy", "abde");
     find(r"abc\|d", "xxxabdeyy", "abd");
