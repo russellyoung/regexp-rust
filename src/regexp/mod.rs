@@ -388,7 +388,7 @@ impl SetUnit {
                         chs.push(ch);
                     }
                 },
-                (_, _) => { return Err(Error::make(8, "unterminated range"))},
+                (_, _) => { return Err(Error::make(4, "unterminated range"))},
             }
         }
         if !chs.is_empty() {

@@ -186,7 +186,6 @@ pub fn main() {
     crate::regexp::walk::set_abbrev_size(config.abbrev);
     
     if config.interactive { return Interactive::new(config).run(); }
-    println!("RUNNING  '{}'  '{}'", config.re, config.text);
     set_trace(config.debug as usize);
     // execution starts
     match regexp::parse_tree(&config.re, "alternative".starts_with(&config.parser)) {
@@ -196,7 +195,7 @@ pub fn main() {
                 println!("--- Parse tree:");
                 tree.desc(0);
             }
-            println!("{:?}", config);
+            //println!("{:?}", config);
             if !config.text.is_empty() {
                 match regexp::walk_tree(&tree, &config.text) {
                     Ok(Some((path, char_start))) => { println!("{:?}", path); Report::new(&path, char_start).display(0)},

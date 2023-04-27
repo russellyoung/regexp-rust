@@ -99,6 +99,11 @@ impl<'a> Path<'a> {
         (first.start, last.end)
     }
         
+    pub fn end(&self) -> usize {
+        let (_, last) = self.first_last();
+        last.end
+    }
+        
     /// the length of the match, in bytes. This means it can be used to extract the unicode string from the string element
     pub fn match_len(&self) -> usize {
         let (start, end) = self.range();
@@ -131,92 +136,78 @@ impl<'a> Path<'a> {
         }
     }
     
-    /// backs off a step on the path: when a path fails the process backtracks a step and tries again. This
-    /// actually handles both the lazy and the greedy cases: for greedy the initial path walks to the upper limit
-    /// or to failure, whichever is smaller, and backs off by removing a step from the path. For the lazy case
-    /// the initial path is the minimum length, and it case of failure it adds another step to the end, up to the
-    /// maximum limit
-    fn pop(&mut self) -> Option<isize> {
-        // for AND node first try popping off the last step in the last successful subPath . If that cannot be done then go ahead and pop pff the AND
-        match self {
-            Path::And(steps) => {
-                let last = steps.len() - 1;
-                let children = &mut steps[last].child_paths;
-                let len = children.len();
-                if !children.is_empty() {
-                    if let Some(size) = children[len - 1].pop() {
-                        return Some(size);
-                    }
-                }
-            },
-            Path::Or(steps) => {
-                let last = steps.len() - 1;
-                if let Some(size) = steps[last].child_path.pop() {
-                    return Some(size);
-                }
-            },
-            _ => (),
-        }
-        let ret = if self.limits().lazy { self.lazy_pop() }
-        else { self.greedy_pop() };
-        if trace(4) {
-            trace_indent();
-            println!("backoff: {:?}, success: {}", self, !ret.is_none())}
-        ret
-    }
-
-    /// implementation of pop() for greedy evaluation
-    fn greedy_pop(&mut self) -> Option<isize> {
+    fn back_off(&mut self) -> bool {
+        if trace(6) { trace_change_indent(1); }
         let limits = self.limits();
-        let match_len = match self {
-            Path::Chars(steps) => {
-                let x = steps.pop().unwrap();
-                if trace(5) {trace_indent(); println!("popping off {:?}", x); }
-                x.matched.len()
-            },
-            Path::And(steps) => {
-                let x = steps.pop().unwrap();
-                if trace(5) {trace_indent(); println!("popping off {:?}", x); }
-                x.matched.len()
-            },
-            Path::Or(steps) => {
-                let x = steps.pop().unwrap();
-                if trace(5) {trace_indent(); println!("popping off {:?}", x); }
-                x.matched.len()
-            },
-            Path::None => panic!("pop(): NONE unexpected"),
-        };
-        if limits.check(self.len()) == 0 { Some(match_len as isize) } else { None }
-    }
-
-    /// implementation of pop() for lazy evaluation
-    fn lazy_pop(&mut self) -> Option<isize> {
-        if self.limits().check(self.len() + 1) != 0 { return None; }
-        let mut match_len: isize = -1;
-        match self {
-            Path::Chars(steps) => {
-                if let Some(step) = steps[steps.len() - 1].step() {
-                    match_len = step.matched.len() as isize;
-                    steps.push(step);
-                }
-            },
-            Path::And(steps) => {
-                let len = steps.len();
-                if let Some(step) = steps[len - 1].step() {
-                    match_len = step.matched.len() as isize;
-                    steps.push(step);
-                }
-            },
-            Path::Or(steps) => {
-                if let Some(step) = steps[steps.len() - 1].step() {
-                    match_len = step.matched.len() as isize;
-                    steps.push(step);
-                }
-            },
-            Path::None => panic!("NONE unexpected"),
+        let mut ret = true;
+        if limits.lazy {
+            match self {
+                Path::Chars(steps) => {
+                    if limits.check(steps.len() + 1) == 0 {
+                        if let Some(next_step) = steps.last().unwrap().step() {
+                            steps.push(next_step);
+                            ret = true;
+                        }
+                    }
+                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret); }
+                },
+                Path::And(steps) => {
+                    let len0 = steps.len();
+                    if steps[len0 - 1].back_off() { ret = true; }
+                    else if limits.check(steps.len() + 1) == 0 {
+                        if let Some(next_step) = steps[len0 - 1].step() {
+                            steps.push(next_step);
+                            ret = true;
+                        } 
+                    } 
+                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, steps was {}, now {}: {}", steps.last().unwrap(), len0, steps.len(), ret); }
+                },
+                Path::Or(steps) => {
+                    let len0 = steps.len();
+                    if steps[len0 - 1].back_off() { ret = true; }
+                    else if limits.check(steps.len() + 1) == 0 {
+                        if let Some(next_step) = steps[len0 - 1].step() {
+                            steps.push(next_step);
+                            ret = true;
+                        } 
+                    } 
+                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, steps was {}, now{}: {}", steps.last().unwrap(), len0, steps.len(), ret); }
+                },
+                _ => panic!("Should not be trying to back off None node"),
+            }
+        } else {
+            match self {
+                Path::Chars(steps) => {
+                    let _last_step = steps.pop().unwrap();
+                    ret = limits.check(steps.len()) == 0;
+                    if trace(6) { trace_indent(); println!("back off Path: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret); }
+                },
+                Path::And(steps) => {
+                    let mut last_step = steps.pop().unwrap();
+                    let len0 = steps.len();
+                    if last_step.back_off() {
+                        ret = true;
+                        steps.push(last_step);
+                    } else {
+                        ret = limits.check(steps.len()) == 0;
+                    }
+                    if trace(6) { trace_indent(); println!("back off: {:?}, steps was {}, now {}: {}", steps.last().unwrap(), len0, steps.len(), ret); }
+                },
+                Path::Or(steps) => {
+                    let len0 = steps.len();
+                    let mut last_step = steps.pop().unwrap();
+                    if last_step.back_off() {
+                        steps.push(last_step);
+                    } else {
+                        ret = limits.check(steps.len()) == 0;
+                    }
+                    if trace(6) { trace_indent(); println!("back off Path: {:?} steps was {}, now {}", steps.last().unwrap(), len0, steps.len()); }
+                },
+                _ => panic!("Should not be trying to back off None node"),
+            }
         }
-        if match_len < 0 { None }
-        else { Some(-match_len) }
+        if trace(6) { trace_change_indent(-1); }
+        ret
     }
 
     /// recursively creates **Report** objects for a path. For the branches (And and Or) this means recording itself
@@ -263,8 +254,14 @@ impl<'a> Path<'a> {
     }
 }
 
+/// Trace Levels
+/// level 1: just trace phase
+/// level 2: trace start of walks
+/// level 3: trace start and  end of walks
+/// level 4: trace start and  end of walks and each new child in an AND
+
 /// prints message when entering walk (trace level 2)
-fn trace_start_walk<'a, T: Debug>(vec: &'a Vec<T>) {
+fn trace_start_walk<'a, T: Debug>(vec: &'a [T]) {
     if trace(2) {
         trace_indent();
         println!("Start walk for {:?}", &vec[0]);
@@ -286,10 +283,16 @@ fn trace_end_walk(path: Path) -> Path {
 }
 
 /// prints message when taking a new step during a walk (trace level 4)
-fn trace_pushing<'a, T: Debug>(obj: &'a T, len: usize) {
+fn trace_pushing<T: Debug>(obj: &T, len: usize) {
     if trace(4) {
         trace_indent();
         println!("Pushing {:?} rep {}", obj, len - 1);
+    }
+}
+fn trace_new_step(and_step: &AndStep) {
+    if trace(5) {
+        trace_indent();
+        println!("-- new step in AND: {:?}", and_step);
     }
 }
 
@@ -299,11 +302,6 @@ fn trace_pushing<'a, T: Debug>(obj: &'a T, len: usize) {
 // Debug implementations: used for tracing
 //
 //////////////////////////////////////////////////////////////////
-impl<'a> Walker for CharsStep<'a> {}
-//impl<'a> Walker for SetStep<'a> {}
-impl<'a> Walker for AndStep<'a> {}
-impl<'a> Walker for OrStep<'a> {}
-
 impl<'a> Debug for CharsStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{{{:?}}}, string {} len {}", self.node, self.matched.abbrev(), self.matched.len())
@@ -315,9 +313,10 @@ impl<'a> Debug for AndStep<'a> {
         let mut child_counts: String = "".to_string();
         for p in self.child_paths.iter() { child_counts.push_str(&format!("{}, ", p.len())); }
         for _i in self.child_paths.len()..self.node.nodes.len() { child_counts.push_str("-, "); }
-        write!(f, "{{{:?}}} state [{}], string {} len {}",
+        write!(f, "{{{:?}}} state [{}], matching \"{}\", string {} len {}",
                self.node,
                child_counts,
+               self.matched.string(),
                self.matched.abbrev(),
                self.matched.len())
     }
@@ -339,22 +338,18 @@ impl<'a> Debug for Path<'a> {
         match self {
             Path::Chars(steps) =>    {
                 if steps.is_empty() { write!(f, "Path Chars, reps 0, match \"\"") }
-                else {write!(f, "Path {:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
+                else {write!(f, "Path {:?}, steps {}, match \"{}\"", steps[steps.len() - 1].node, self.len(), self.matched_string())}
             },
-            // Path::Set(steps) => {
-            //     if steps.is_empty() { write!(f, "Path Set, reps 0, match \"\"") }
-            //     else {write!(f, "Path {:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())}
-            // },
             Path::And(steps) => {
                 if steps.is_empty() { write!(f, "Path And, reps 0, match \"\"") }
                 else {
-                    write!(f, "Path {:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())
+                    write!(f, "Path {:?}, steps {}, match \"{}\"", steps[steps.len() - 1].node, self.len(), self.matched_string())
                 }
             },
             Path::Or(steps) => {
                 if steps.is_empty() { write!(f, "Path Or, reps 0, match \"\"") }
                 else {
-                    write!(f, "Path {:?}, reps {}, match \"{}\"", steps[steps.len() - 1], self.len(), self.matched_string())
+                    write!(f, "Path {:?}, steps {}, match \"{}\"", steps[steps.len() - 1].node, self.len(), self.matched_string())
                 }
             },
             Path::None => write!(f, "NONE should not be included in any path"),
@@ -416,7 +411,8 @@ impl<'a> AndStep<'a> {
         let mut steps = vec![AndStep {node, matched, child_paths: Vec::<Path<'a>>::new()}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
-            match steps.last().unwrap().step() {
+            let len = steps.len();
+            match steps[len - 1].step() {
                 Some(s) => {
                     trace_pushing::<AndStep>(&s, steps.len());
                     steps.push(s);
@@ -428,55 +424,63 @@ impl<'a> AndStep<'a> {
     }
 
     /// try to take a single step matching an And node
-    fn step(&self) -> Option<AndStep<'a>> {
+    fn step(&mut self) -> Option<AndStep<'a>> {
         let mut step = AndStep {node: self.node,
                                 matched: self.matched.next(0),
                                 child_paths: Vec::<Path<'a>>::new(),
         };
         loop {
             let child_len = step.child_paths.len();
-            if child_len == step.node.nodes.len() { break; }
+            if child_len == step.node.nodes.len() {
+                break;    // all child nodes are satisfied, return success
+            }
             let child_path = step.node.nodes[child_len].walk(step.matched.next(0));
             if child_path.limits().check(child_path.len()) == 0 {
-                step.matched.end += child_path.match_len();
                 step.child_paths.push(child_path);
-                if trace(4) {
-                    trace_change_indent(-1);
-                    trace_indent();
-                    println!("-- new step in AND: {:?}", step);
-                    trace_change_indent(1);
-                }
-            } else if step.back_off() {
-                let (_, end) = step.child_paths.last().unwrap().range();
-                step.matched.end = end;
-            } else {
+                trace_new_step(&step);
+            } else if !step.back_off() {
                 return None;
+            } else {
             }
+            step.matched.set_end(step.child_paths.last().unwrap().end());
         }
-        let (_, end) = step.child_paths.last().unwrap().range();
-        step.matched.set_end(end);
         Some(step)
     }
 
-    /// back off a step after a failed match: after taking a step back see if the path length still falls within
-    /// the desired limits, if it does continue along that new path to see if it succeeds, if not remove that child
-    /// and then back off on the preceding child. When all children have been exhausted the step has failed.
+    /// Back off a step after a failed match. It will back off repetitions until an untried one is found,
+    /// leaving the **Node** in a state to proceed from there, or return **false** if the node cannot succeed
+    ///
+    /// It is important to keep in mind the difference between **XXXStep.back_off()** and **Path::back_off()**. For **Path**
+    /// **back_off()** only touches the path - that is, the Vec<XXXStep>. It can change Steps higher in the hierarchy
+    /// or pop off the last step, but cannot change anything inside any of the *Step**s. **XXXStep::back_off()** ,
+    /// on the other hand, should only change things within the current Step, that is 
     fn back_off(&mut self) -> bool {
-        loop {
-            if self.child_paths.is_empty() { return false; }
-            let last_pathnum = self.child_paths.len() - 1;
-            if let Some(size) = self.child_paths[last_pathnum].pop() {
-                // self.matched.end = (self.matched.end as isize - size) as usize;
-                self.matched.move_end(-size);
-                return true;
-            }
-            if let Some(path) = self.child_paths.pop() {
-                if self.child_paths.is_empty() {
-                    self.matched.end -= path.matched_string().len();
-                    continue;
-                }
-            } return false;
+        if trace(6) { trace_change_indent(1); }
+        let limits = self.node.limits;
+        let mut ret = true;
+        if limits.lazy {
+            // TODO
+            ret = false;
         }
+        else {
+            loop {
+                // This pops off the last child path. If the Path backs off it is restored, if not then it is already removed
+                if let Some(mut last_path) = self.child_paths.pop() {
+                    if last_path.back_off() {
+                        self.child_paths.push(last_path);
+                        break;
+                    }
+                } else { ret = false; break; }
+                // backed off until reps are too few, discard
+                if limits.check(self.child_paths.len()) != 0 { 
+                    ret = false;
+                    break;
+                }
+            };
+        }
+        if ret { self.matched.set_end(self.child_paths.last().unwrap().end()); }
+        if trace(6) { trace_change_indent(-1); }
+        ret
     }
     
     /// Compiles a **Report** object from this path and its children after a successful search
@@ -521,35 +525,34 @@ impl<'a> OrStep<'a> {
                                child_path: Box::new(Path::None),
         };
         loop {
-            if step.which == step.node.nodes.len() { return None; }
+            if step.which == step.node.nodes.len() {
+                if trace(4) { trace_indent(); println!("    OR step failed"); }
+                return None;
+            }
             step.child_path = Box::new(step.node.nodes[step.which].walk(self.matched.next(0)));
-            //step.matched.end = step.matched.start + step.child_path.match_len();
-            step.matched.set_end(step.matched.start + step.child_path.match_len());
             if step.child_path.limits().check(step.child_path.len()) == 0 { break; }
-            if !step.back_off() { return None; }
+            step.which += 1;
         }
-        if trace(4) {
-            trace_change_indent(-1);
-            trace_indent();
-            println!("new OR step: {:?}", step);
-            trace_change_indent(1);
-        }
+        if trace(6) { trace_indent(); println!("    new OR step: {:?}", step); }
+        step.matched.set_end(step.child_path.end());
         Some(step)
     }
 
     fn back_off(&mut self) -> bool {
-        if let Some(len) = self.child_path.pop() {
-            //self.matched.end = (self.matched.end as isize - len) as usize;
-            self.matched.move_end(-len);
-            true
-        } else {
-            // self.matched.end = self.matched.start;
-            self.matched.set_end(self.matched.start);
+        let limits = self.node.limits;
+        loop {
+            if self.child_path.back_off() { break; }
             self.which += 1;
-            self.which < self.node.nodes.len()
+            if self.which >= self.node.nodes.len() { return false; }
+            self.child_path = Box::new(self.node.nodes[self.which].walk(self.matched.next(0)));
+            if limits.check(self.child_path.len()) != 0 {
+                return false;   // backed off until reps are too few, discard
+            }
         }
+        self.matched.set_end(self.child_path.end());
+        true
     }
-
+    
     /// Compiles a **Report** object from this path and its child after a successful search
     fn make_report(&self, char_start: usize) -> (Report, usize) {
         let (subreports, char_end) = self.child_path.gather_reports(char_start);
@@ -560,7 +563,7 @@ impl<'a> OrStep<'a> {
                  subreports},
          char_end)
     }
-
+/*
     fn back_off_greedy(vec: &mut Vec<CharsStep>) -> Option<isize> {
         if let Some(last_step) = vec.pop() {
             if last_step.node.limits.check(vec.len()) == 0 {
@@ -580,6 +583,7 @@ impl<'a> OrStep<'a> {
         }
         None
     }
+*/
 }
 
 impl<'a> Clone for Matched<'a> {
