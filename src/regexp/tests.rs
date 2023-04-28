@@ -25,7 +25,7 @@ fn peekable() {
             && Some('d') == peek_4[0]
             && Some('e') == peek_4[1]
             && Some('z') == peek_4[2]
-            && None == peek_4[3]);
+            && peek_4[3].is_none());
     assert_eq!(Some('d'), chars.next());
     assert_eq!(Some('e'), chars.next());
     assert_eq!(Some('z'), chars.next());
@@ -65,7 +65,7 @@ fn limits_test() {
             assert!(limits.lazy == lazy, "lazy check failed for ({}, {}, {})", min, max, lazy);
         } else { panic!("failed parsing Limits"); }
     }
-    assert!(chars.next() == None, "Failed to consume test string");
+    assert!(chars.next().is_none(), "Failed to consume test string");
 }
 
 //
@@ -78,10 +78,10 @@ fn make_chars_single(block: CharsContents, min: usize, max: usize, lazy: bool) -
     Node::Chars(CharsNode{blocks: vec![block], limits: Limits{min, max, lazy}, named: None})
 }
 
-fn make_root<'a> (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
+fn make_root (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
 
-fn make_and<'a> (min: usize, max: usize, lazy: bool, name: Option<&'a str>) -> Node {
-    let named = {if let Some(n) = name {Some(n.to_string())} else {None}};
+fn make_and (min: usize, max: usize, lazy: bool, name: Option<&str>) -> Node {
+    let named = name.map(|n| n.to_string());
     Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, named, anchor: false})
 }
 fn make_or() -> Node {
@@ -355,25 +355,25 @@ fn reports() {
     assert!(report.get_by_name("fred").is_empty());
     let first = report.get_by_name("first");
     assert!(first.len() == 1);
-    check_report(&first[0], "cdefef", (3, 9), (3, 9), 2);
+    check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
     let second = report.get_by_name("second");
     assert!(second.len() == 2);
-    check_report(&second[0], "ef", (5, 7), (5, 7), 0);
-    check_report(&second[1], "ef", (7, 9), (7, 9), 0);
+    check_report(second[0], "ef", (5, 7), (5, 7), 0);
+    check_report(second[1], "ef", (7, 9), (7, 9), 0);
     let zeroth = report.get_by_name("");
-    check_report(&zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
+    check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
     assert!(report.get_by_name("fake").is_empty());
     // all names
     let all = report.get_named();
     let zeroth = all.get("").unwrap();
-    check_report(&zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
+    check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
     let first = all.get("first").unwrap();
     assert!(first.len() == 1);
-    check_report(&first[0], "cdefef", (3, 9), (3, 9), 2);
+    check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
     let second = all.get("second").unwrap();
     assert!(second.len() == 2);
-    check_report(&second[0], "ef", (5, 7), (5, 7), 0);
-    check_report(&second[1], "ef", (7, 9), (7, 9), 0);
+    check_report(second[0], "ef", (5, 7), (5, 7), 0);
+    check_report(second[1], "ef", (7, 9), (7, 9), 0);
     assert!(all.get("fake").is_none());
 }
 
@@ -381,7 +381,7 @@ fn reports() {
 // error tests
 //
 fn e_check(alt: bool, re: &str, ecode: usize) {
-    match parse_tree(re, false) {
+    match parse_tree(re, alt) {
         Ok(_) => panic!("Expected error {} parsing \"{}\", didn't get it", ecode, re),
         Err(error) => assert!(error.code == ecode, "Parsing \"{}\", expected error {}, found error {} ({})", re, ecode, error.code, error.msg),
     }
@@ -425,5 +425,5 @@ fn alt_or() {
 
 #[test]
 fn alt_err() {
-    e_check(false, r"or(abc def)", 2);
+    e_check(true, r"or(abc def)", 2);
 }

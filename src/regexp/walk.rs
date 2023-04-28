@@ -74,12 +74,7 @@ pub enum Path<'a> { Chars(Vec<CharsStep<'a>>),  And(Vec<AndStep<'a>>), Or(Vec<Or
 
 impl<'a> Path<'a> {
     // basic methods
-    pub fn is_none(&self) -> bool {
-        match self {
-            Path::None => true,
-            _ => false,
-        }
-    }
+    pub fn is_none(&self) -> bool { matches!(self, Path::None)}
     
     pub fn is_empty(&self) -> bool { self.len() == 0 }
     
@@ -245,7 +240,7 @@ impl<'a> Path<'a> {
                 for step in iter {
                     let (subreport, pos) = step.make_report(char_pos);
                     char_pos = pos;
-                    if !subreport.name.is_none() { reports.push(subreport); }
+                    if subreport.name.is_some() { reports.push(subreport); }
                 }
             },
             Path::None => panic!("Should not be any None path when compiling report"),
@@ -279,7 +274,7 @@ impl<'a> Path<'a> {
 /// level 4: trace start and  end of walks and each new child in an AND
 
 /// prints message when entering walk (trace level 2)
-fn trace_start_walk<'a, T: Debug>(vec: &'a [T]) {
+fn trace_start_walk<T: Debug>(vec: &[T]) {
     if trace(2) {
         trace_indent();
         println!("Start walk for {:?}", &vec[0]);
@@ -599,7 +594,7 @@ impl<'a> OrStep<'a> {
 }
 
 impl<'a> Clone for Matched<'a> {
-    fn clone(&self) -> Self { Matched {full_string: &self.full_string[..], start: self.start, end: self.end, char_start: self.char_start} }
+    fn clone(&self) -> Self { Matched {full_string: self.full_string, start: self.start, end: self.end, char_start: self.char_start} }
 }
 
 impl<'a> Matched<'a> {
@@ -615,7 +610,7 @@ impl<'a> Matched<'a> {
     fn remainder(&self) -> &str { &self.full_string[self.end..] }
     /// Builds a new Matched object immediately following the one pointed to by self
     fn next(&self, len: usize) -> Matched<'a> {
-        Matched {full_string: &self.full_string[..], start: self.end, end: self.end + len, char_start: self.char_start + self.len_chars() }
+        Matched {full_string: self.full_string, start: self.end, end: self.end + len, char_start: self.char_start + self.len_chars() }
     }
     /// Moves the end of Matched by the amount given
     fn move_end(&mut self, delta: isize) {

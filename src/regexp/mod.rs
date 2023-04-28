@@ -275,7 +275,7 @@ impl CharsNode {
     }
     
     fn return_1(&mut self, chars: &mut Peekable) {
-        chars.put_back_str(&format!("{}", self.limits).as_str());
+        chars.put_back_str(format!("{}", self.limits).as_str());
         self.limits = Limits::default();
         match self.blocks.pop() {
             Some(CharsContents::Regular(mut text)) => {
@@ -567,7 +567,7 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
     let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
     let mut outer_and =
         if alt_parser {
-            chars.push(')');
+            chars.push_str(" )");
             AndNode::alt_parse_node(&mut chars)?
         } else {
             chars.push_str(r"\)");
@@ -626,7 +626,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
     let mut char_start = 0;
     loop {
         if trace(1) {println!("\n==== WALK \"{}\" ====", &text[start_pos..])}
-        let matched = Matched { full_string: text, start: start_pos, end: start_pos, char_start: char_start };
+        let matched = Matched { full_string: text, start: start_pos, end: start_pos, char_start };
         let path = tree.walk(matched);
         if path.len() > 1 {
             if trace(1) { println!("--- Search succeeded ---") };
@@ -685,10 +685,10 @@ fn alt_parse(chars: &mut Peekable) -> Result<Node, Error> {
     let mut node = match chars.skip_whitespace().peek_n(4)[..] {
         [Some('a'), Some('n'), Some('d'), Some('(')] => AndNode::alt_parse_node(chars.consume(4))?,
         [Some('o'), Some('r'), Some('('), _] => OrNode::alt_parse_node(chars.consume(3))?,
-        [Some('"'), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), &"\"")?,
-        [Some('\''), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), &"'")?,
-        [Some('t'), Some('x'), Some('t'), Some('(')] => CharsNode::alt_parse_node(chars.consume(4), &r")")?,
-        [_, _, _, _] => CharsNode::alt_parse_node(chars, &"")?,
+        [Some('"'), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), "\"")?,
+        [Some('\''), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), "'")?,
+        [Some('t'), Some('x'), Some('t'), Some('(')] => CharsNode::alt_parse_node(chars.consume(4), r")")?,
+        [_, _, _, _] => CharsNode::alt_parse_node(chars, "")?,
         _ => return Err(Error::make(101, format!("Unexpected chars in regular expression: \"{}\"", chars.preview(6)).as_str()))
     };
     node.set_named(alt_parse_named(chars)?);
