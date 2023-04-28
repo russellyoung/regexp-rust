@@ -70,7 +70,7 @@ trait Walker: Debug {}
 /// Path fails it backtracks a Step and tries again.
 //
 //////////////////////////////////////////////////////////////////
-pub enum Path<'a> { Chars(Vec<CharsStep<'a>>), /*Set(Vec<SetStep<'a>>),*/ And(Vec<AndStep<'a>>), Or(Vec<OrStep<'a>>), None }
+pub enum Path<'a> { Chars(Vec<CharsStep<'a>>),  And(Vec<AndStep<'a>>), Or(Vec<OrStep<'a>>), None }
 
 impl<'a> Path<'a> {
     // basic methods
@@ -252,6 +252,24 @@ impl<'a> Path<'a> {
         }
         (reports, char_pos)
     }
+
+    pub fn dump(&self, indent: usize) {
+        match self {
+            Path::Chars(steps) => {
+                if steps.len() == 1 { steps[0].dump(indent); }
+                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
+            },
+            Path::And(steps) => {
+                if steps.len() == 1 { steps[0].dump(indent); }
+                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
+            },
+            Path::Or(steps) => {
+                if steps.len() == 1 { steps[0].dump(indent); }
+                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
+            },
+            Path::None => panic!("NONE unexpected in Path::dump()"),
+        }
+    }   
 }
 
 /// Trace Levels
@@ -403,6 +421,10 @@ impl<'a> CharsStep<'a> {
                  subreports: Vec::<Report>::new()},
                  char_start + char_len)
     }
+
+    fn dump(&self, indent: usize) {
+        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+    }
 }
 
 impl<'a> AndStep<'a> {
@@ -499,6 +521,12 @@ impl<'a> AndStep<'a> {
                  subreports: reports},
          char_end)
     }
+
+    pub fn dump(&self, indent: usize) {
+        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+        self.child_paths.iter().for_each(|x| x.dump(indent + 1));
+    }
+        
 }
 
 /// OR does not have a *step()* function because it cannot have a repeat count (to repeat an OR it must be enclosed in an AND)
@@ -563,27 +591,11 @@ impl<'a> OrStep<'a> {
                  subreports},
          char_end)
     }
-/*
-    fn back_off_greedy(vec: &mut Vec<CharsStep>) -> Option<isize> {
-        if let Some(last_step) = vec.pop() {
-            if last_step.node.limits.check(vec.len()) == 0 {
-                return Some(-(last_step.matched.len() as isize));
-            }
-        }
-        None
+
+    pub fn dump(&self, indent: usize) {
+        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+        self.child_path.dump(indent + 1);
     }
-    
-    fn back_off_lazy(vec: &mut Vec<CharsStep>) -> Option<isize> {
-        let last_step = vec.last().unwrap();
-        if let Some(next_step) = last_step.step() {
-            if next_step.node.limits.check(vec.len() + 1) == 0 {
-                vec.push(next_step);
-                return Some(vec.last().unwrap().matched.len() as isize);
-            }
-        }
-        None
-    }
-*/
 }
 
 impl<'a> Clone for Matched<'a> {

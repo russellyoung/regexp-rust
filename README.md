@@ -29,17 +29,29 @@ a few week's rest I decided to give it a go.
 
 ## _RELEASE!_
 
-oops, maybe not. Further testing and adding a second parser (for my
-own, more rational RE language) caused a redesign where there is a
-state struct passed to each Step in the walk phase instead of a direct
-pointer to the string and its endpoint. This is much cleaner and makes
-the code easier to work with and understand - except it doesn't
-compile. There are currently two branches: **main**, which works but
-has a bug case and doesn't have the new parser, and **broken**, which
-doesn't compile, so I don't know of the new parser works and the bug
-is fixed. (I'm sure there are still a few more bugs to work out, but
-the logic should be there). Major thanks to anyone who can explain to
-me why the compile fails.
+**ALMOST DONE!**
+
+The back-off bugs have been fixed, and the alternative parser seems to
+be working. I'm pretty happy with it.
+
+What remains: 
+
+ -  **interactive** is broken, it needs to be fixed. I've been waiting
+   for the new parser to be ready. There also is an issue that the old
+   command RE in interactive isn't working - is it broken? I want to
+   investigate and see if ti reveals a new bug.
+   
+ - I am suspicious that **Report**s might have a problem - I have
+   haven't looked at them since making major changes in the deep
+   structures, and after every change I expected them to break, and
+   they still haven't (at least, not blatantly). I need to convince
+   myself they work for unicode, and that names are handled properly.
+   
+ - More tests are needed for the alternate REs
+ 
+ - And documentation, especially of the alternate parser
+
+
 
 I'm pleased to say it seems to be done. The basic program is working,
 the support environment - testing and documentation - is done, to some
@@ -93,10 +105,77 @@ need to get back to other things. Still, it has been an eye-opening
 experience, and when I get back to the US and look for work I can at
 least consider positions that use Rust.
 
-Finally, these questions are left over from the previous README edition, and still seem relevant:
 
-- Is wrapping my structs in enums a bad idea? I haven't seen this done elsewhere, usually Box is used. Is there some reason this would be discouraged?
-- How about my trace() method? While it doesn't make a big difference here I don't want to evaluate the args unless they will be printed. This looks like a good place for a macro, right? That may be the next thing I try figuring out, though it looks kind of daunting.
-- I think a well designed trait would let me make all the Path enums contents use the dyn trait rather than different objects. This would minimize the need for all those Path methofs that just distribute messages to their struct content. I looked into this briefly at one poin but ran into issues and wen back to the simpler way.
+Even though it's almost done, comments are still welcomed and
+encouraged. I promise to think about everything that comes in.
 
-Comments welcomed and encouraged. I promise to think about everything that comes in.
+## _Alternat Parser_
+
+### Rationale
+
+While trying to handle some of the idiosycnracies of traditional
+regular expressions I realized that a more logically designed language
+makes a lot of sense. The particulars of **or**, no way to group
+characters save using an **AND** node, and **OR**s and repetitions
+binding to single characters added comlexity, make it an illigically
+designed language, and require complexity to implement that does not
+provide sufficient payback (IMHO).
+
+In addition, while trying to set up emacs to edit rust files, I ran
+across some emacs source code where the writer developed a bunch of
+macros to make long, complex regular expressions easier to write and
+to understand. Making a new regular expression syntax would only
+require a new front end, if the foundations and walk logic were
+flexible enough to provide common tools, and (with a little work) they
+turned out to have them.
+
+So, here is an intro to the alternate regular expressions. It provides
+the following features:
+
+ - Whitespace between units are ignored. This means indenting and new
+   lines can be used to help make the meaning clearer
+ - Characters are clumped together into string units. String units can
+   have names and repetition counts added to them without needing to
+   wrap them in **AND** nodes. They can also contain repetition counts
+   internally, though these cannot have names assigned.
+ - String units contain characters, special characters, and
+   ranges. They can be writen in several ways: 
+   - **"..."** or **'...'** a unit surrounded with either single or
+   double quotes is a string unit. This way inserting one of the quote
+   characters is easier. Or, quote characters can be escaped using
+   '\'.
+   - **txt(...)** Similar to the syntax for **and()** and **or()**,
+     the **txt(...)** function can be used to make a string unit.
+   - Finally, characters without any unit indicator are interpreted as
+     string units. This makes writing them simple, but does have
+     drawbacks: no whitespace characters can be embedded, unless
+     preceded by '\', and care must be taken that there is a space
+     afterward to signify the termination. **or(abc def)** will not
+     find the string "abc" **pr** "def", it will report an error
+     because the closing ')' of the **or()** will be interpreted as
+     part of the string "def)". Also, using this implied notation, it
+     is not possible to assign names or repeat counts to string
+     units. For thatthe units must be enclosed.
+ - **AND** nodes are created by enclosing them using the function
+   notation **and(...)**. Inside the **AND** any units can be
+   included. There is no comma or other punctioation separating two
+   AND children.
+ - **OR** nodes, like **AND** nodes, are written explicitly using the
+   enclosure **or(...)**. This is a big win over traditional regular
+   expressions that use "\|" as an infix function indicator.
+ - **Names and repetition counts**: All units can have names or
+   repetition counts. They are defined by trailing a unit with the
+   proper code.
+   - Repetition counts use the traditional notation: '?', '*', '+',
+	 '{...}', optionally followed by '?' to indicate lazy evaluation.
+   - Names are defined by including the name within "<>" brackets. To
+     record a match without a name leave the brackets empty: "<>",
+     define a name by including it inside: "<name>". If no brackets
+     are included the match is not reported in the results structure.
+   - The order in which the name and repetition count are given is
+     significant. **_UNIT_(...)+<name>** will have a single named
+     result containing one or more matches of UNIT;
+     **_UNIT_(...)<name>+** will have one or more matches with the
+     name "name"
+
+ 

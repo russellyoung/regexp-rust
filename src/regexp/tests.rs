@@ -169,10 +169,10 @@ fn or_with_chars_bug() {
 // }
 
 
-fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
+fn find<'a>(alt: bool, re: &'a str, text: &'a str, expected: &'a str) {
     print!("RUNNING '{}' '{}'... ", re, text);
     std::io::stdout().flush().unwrap();
-    let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
     let (path, _) = walk_tree(&tree, text)
         .unwrap_or_else(|err| panic!("Expected \"{}\", got error '{}'", expected, err))
         .unwrap_or_else(|| panic!("Expected {}, found none", expected));
@@ -180,8 +180,8 @@ fn find<'a>(re: &'a str, text: &'a str, expected: &'a str) {
     println!("OK");
 }       
         
-fn not_find<'a>(re: &'a str, text: &'a str) {
-    let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+fn not_find<'a>(alt: bool, re: &'a str, text: &'a str) {
+    let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
     assert!(walk_tree(&tree, text).unwrap().is_none(), "re \"{}\" expected no match, found one", re);
 }       
 
@@ -190,55 +190,55 @@ fn not_find<'a>(re: &'a str, text: &'a str) {
 //
 #[test]
 fn simple_chars() {
-    find("abc", "abcd", "abc");
-    find("bcd", "abcd", "bcd");
-    find("bcd", "abcde", "bcd");
-    not_find("bcd", "abde");
+    find(false, "abc", "abcd", "abc");
+    find(false, "bcd", "abcd", "bcd");
+    find(false, "bcd", "abcde", "bcd");
+    not_find(false, "bcd", "abde");
 }
     
 fn rep_chars() {
-    find("abc*d", "abcdz", "abcd");
-    find("abc+d", "abcdz", "abcd");
-    find("abc*d", "abccdz", "abccd");
-    find("abc*d", "abdz", "abd");
-    not_find("abc+d", "abd");
-    not_find("abc{2}d", "abcdz");
-    find("abc{2}d", "abccdz", "abccd");
-    not_find("abc{2}d", "abcccdz");
-    find("abc{2,3}d", "abcccdz", "abcccd");
-    find(r"a\d*\|b*c", "aacc", "ac");
-    find(r"a\d*\|b*c", "aabbbcc", "abbbc");
-    find(r"a\d*\|b*c", "a12c", "a12c");
-    not_find(r"a\d*\|b*c", "aa1bcc");
+    find(false, "abc*d", "abcdz", "abcd");
+    find(false, "abc+d", "abcdz", "abcd");
+    find(false, "abc*d", "abccdz", "abccd");
+    find(false, "abc*d", "abdz", "abd");
+    not_find(false, "abc+d", "abd");
+    not_find(false, "abc{2}d", "abcdz");
+    find(false, "abc{2}d", "abccdz", "abccd");
+    not_find(false, "abc{2}d", "abcccdz");
+    find(false, "abc{2,3}d", "abcccdz", "abcccd");
+    find(false, r"a\d*\|b*c", "aacc", "ac");
+    find(false, r"a\d*\|b*c", "aabbbcc", "abbbc");
+    find(false, r"a\d*\|b*c", "a12c", "a12c");
+    not_find(false, r"a\d*\|b*c", "aa1bcc");
 }
     
 #[test]
 fn unicode() {
-    find("abc", "ab你好abcd", "abc");
-    find("你好", "ab你好abcd", "你好");
-    find("你好you-all", "ab你好you-allabcd", "你好you-all");
-    find("a.*a", "qqab你好abcd", "ab你好a");
-    find(r"是很*好", "这是很很很好",  "是很很很好");
+    find(false, "abc", "ab你好abcd", "abc");
+    find(false, "你好", "ab你好abcd", "你好");
+    find(false, "你好you-all", "ab你好you-allabcd", "你好you-all");
+    find(false, "a.*a", "qqab你好abcd", "ab你好a");
+    find(false, r"是很*好", "这是很很很好",  "是很很很好");
 }
 
     
 #[test]
 fn special_chars() {
-    find("ab.de", "aabcdef", "abcde");
-    find("ab.*de", "abcdedefg", "abcdede");
-    not_find("cde.", "abcde");
-    find(".*", "ab1234fg", "ab1234fg");
-    find(r"\d+", "ab1234fg", "1234");
-    find(r"\d*", "ab1234fg", "");
-    find(r"b\d*", "ab1234fg", "b1234");
-    not_find(r"xxx$", "abcxxxy");
-    find(r"xxx$", "abcxxx", "xxx");
-    find(r"xxx\$z", "abcxxx$zx", "xxx$z");
-    find(r"^abc", "abcdef", "abc");
-    not_find(r"^abc", "xabcdef");
-    find(r"a^bc", "xa^bcdef", "a^bc");
-    find(r"a\d+\l+", "aba123Ba123bcD", "a123bc");
-    find(r"\a\u+", "你好abCD没有", "bCD");
+    find(false, "ab.de", "aabcdef", "abcde");
+    find(false, "ab.*de", "abcdedefg", "abcdede");
+    not_find(false, "cde.", "abcde");
+    find(false, ".*", "ab1234fg", "ab1234fg");
+    find(false, r"\d+", "ab1234fg", "1234");
+    find(false, r"\d*", "ab1234fg", "");
+    find(false, r"b\d*", "ab1234fg", "b1234");
+    not_find(false, r"xxx$", "abcxxxy");
+    find(false, r"xxx$", "abcxxx", "xxx");
+    find(false, r"xxx\$z", "abcxxx$zx", "xxx$z");
+    find(false, r"^abc", "abcdef", "abc");
+    not_find(false, r"^abc", "xabcdef");
+    find(false, r"a^bc", "xa^bcdef", "a^bc");
+    find(false, r"a\d+\l+", "aba123Ba123bcD", "a123bc");
+    find(false, r"\a\u+", "你好abCD没有", "bCD");
 }
     
 // #[test]
@@ -261,46 +261,46 @@ fn special_chars() {
 
 #[test]
 fn basic_or() {
-    find(r"abc\|de", "xxxabceyy", "abce");
-    find(r"abc\|de", "xxxabdeyy", "abde");
-    find(r"abc\|d", "xxxabdeyy", "abd");
-    find(r"c\|de", "xxxabdeyy", "de");
-    find(r"c\|d", "c", "c");
-    find(r"c\|d", "d", "d");
-    find(r"abc\|d*e", "xxxabceyy", "abce");
-    not_find(r"abc\|d*e", "xxxabcceyy");
-    find(r"abc\|d*e", "xxxabdeyy", "abde");
-    find(r"abc\|d*e", "xxxabeyy", "abe");
-    find(r"abc\|d*e", "xxxabdddeyy", "abddde");
+    find(false, r"abc\|de", "xxxabceyy", "abce");
+    find(false, r"abc\|de", "xxxabdeyy", "abde");
+    find(false, r"abc\|d", "xxxabdeyy", "abd");
+    find(false, r"c\|de", "xxxabdeyy", "de");
+    find(false, r"c\|d", "c", "c");
+    find(false, r"c\|d", "d", "d");
+    find(false, r"abc\|d*e", "xxxabceyy", "abce");
+    not_find(false, r"abc\|d*e", "xxxabcceyy");
+    find(false, r"abc\|d*e", "xxxabdeyy", "abde");
+    find(false, r"abc\|d*e", "xxxabeyy", "abe");
+    find(false, r"abc\|d*e", "xxxabdddeyy", "abddde");
 
-    find(r"\(abc\)\|de", "xxxabcdeyy", "de");
-    find(r"\(abc\)\|de", "xxxabceyy", "abce");
-    find(r"x\(abc\)\|de", "xxxabceyy", "xabce");
-    not_find(r"x\(abc\)\|de", "xxxabeyy");
-    find(r"x\(abc\)+\|\(de\)*d", "xxxabcabcd", "xabcabcd");
-    find(r"x\(abc\)+\|\(de\)*d", "xxxdedededx", "xdededed");
+    find(false, r"\(abc\)\|de", "xxxabcdeyy", "de");
+    find(false, r"\(abc\)\|de", "xxxabceyy", "abce");
+    find(false, r"x\(abc\)\|de", "xxxabceyy", "xabce");
+    not_find(false, r"x\(abc\)\|de", "xxxabeyy");
+    find(false, r"x\(abc\)+\|\(de\)*d", "xxxabcabcd", "xabcabcd");
+    find(false, r"x\(abc\)+\|\(de\)*d", "xxxdedededx", "xdededed");
 }
 
 #[test]
 fn lazy() {
-    find(r"abc*", "xabccc", "abccc");
-    find(r"abc*?", "xabccc", "ab");
-    find(r"abc+?", "xabccc", "abc");
-    find(r"abc*?d", "xabcccd", "abcccd");
-    find(r"abc+?d", "xabcccd", "abcccd");
-    find(r"abc+d", "xabcccd", "abcccd");
-    find(r"a\(bcd\)+?bc", "abcdbcdbcd", "abcdbc");
-    find(r"a\(bcd\)+bc", "abcdbcdbcd", "abcdbcdbc");
-    find(r"ab*\|b", "abbbbbc", "abbbbb");
-    find(r"ab*?\|b", "abbbbbc", "a");
-    find(r"ab+?\|b", "abbbbbc", "ab");
-    find(r"ab+?c", "abbbbbc", "abbbbbc");     // lazy back off
+    find(false, r"abc*", "xabccc", "abccc");
+    find(false, r"abc*?", "xabccc", "ab");
+    find(false, r"abc+?", "xabccc", "abc");
+    find(false, r"abc*?d", "xabcccd", "abcccd");
+    find(false, r"abc+?d", "xabcccd", "abcccd");
+    find(false, r"abc+d", "xabcccd", "abcccd");
+    find(false, r"a\(bcd\)+?bc", "abcdbcdbcd", "abcdbc");
+    find(false, r"a\(bcd\)+bc", "abcdbcdbcd", "abcdbcdbc");
+    find(false, r"ab*\|b", "abbbbbc", "abbbbb");
+    find(false, r"ab*?\|b", "abbbbbc", "a");
+    find(false, r"ab+?\|b", "abbbbbc", "ab");
+    find(false, r"ab+?c", "abbbbbc", "abbbbbc");     // lazy back off
 }
 
 #[test]
 fn former_bugs() {
-    find(r"\(de\)*d", "dededede", "dededed");
-    find(r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
+    find(false, r"\(de\)*d", "dededede", "dededed");
+    find(false, r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
 }
 
 fn get_report<'a>(re: &'a str, text: &'a str, ) -> Report {
@@ -380,7 +380,7 @@ fn reports() {
 //
 // error tests
 //
-fn e_check(re: &str, ecode: usize) {
+fn e_check(alt: bool, re: &str, ecode: usize) {
     match parse_tree(re, false) {
         Ok(_) => panic!("Expected error {} parsing \"{}\", didn't get it", ecode, re),
         Err(error) => assert!(error.code == ecode, "Parsing \"{}\", expected error {}, found error {} ({})", re, ecode, error.code, error.msg),
@@ -389,12 +389,41 @@ fn e_check(re: &str, ecode: usize) {
     
 #[test]
 fn errors() {
-    e_check(r"abc\(de", 2);
-    e_check(r"abc[de", 4);
-    e_check(r"asd\)as", 5);
-    e_check(r"\(?<asd\)", 7);
-    e_check(r"\|sdf", 9);
-    e_check(r"asd{as", 10);
-    e_check(r"asd{4as", 12);
+    e_check(false, r"abc\(de", 2);
+    e_check(false, r"abc[de", 4);
+    e_check(false, r"asd\)as", 5);
+    e_check(false, r"\(?<asd\)", 7);
+    e_check(false, r"\|sdf", 9);
+    e_check(false, r"asd{as", 10);
+    e_check(false, r"asd{4as", 12);
 }
 
+#[test]
+fn alt_chars() {
+    find(true, r"abc", "xabcd", "abc");
+    find(true, r"abc ", "xabcd", "abc");
+    find(true, "\"abc\"", "xabcd", "abc");
+    find(true, r"'abc'", "xabcd", "abc");
+    find(true, r"txt(abc)", "xabcd", "abc");
+    find(true, r"ab\ cd", "xab cde", "ab cd");
+    not_find(true, r"ab cd", "xab cde");
+    find(true, r"ab c", "xabcde", "abc");
+
+    find(true, r"ab*c", "xabbbbcd", "abbbbc");
+    find(true, r"a\dc", "xa9cd", "a9c");
+    find(true, r"a\d*c", "xacd", "ac");
+}
+
+#[test]
+fn alt_or() {
+    find(true, r"or('abc'
+ 	'def')", "xdefd", "def");
+    find(true, r"or(a{3} y+ z )", "aayx", "y");
+    find(true, r"or(a{3} y+ z )", "aaayyz", "aaa");
+    find(true, r"or(a{3} y+ z )", "aazayyz", "z");
+}
+
+#[test]
+fn alt_err() {
+    e_check(false, r"or(abc def)", 2);
+}

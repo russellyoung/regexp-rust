@@ -48,10 +48,10 @@ pub enum Node {Chars(CharsNode), And(AndNode), Or(OrNode), /*Set(SetNode),*/ Non
 impl core::fmt::Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Node::Chars(a)       => a.fmt(f),
-            Node::And(a)         => a.fmt(f),
-            Node::Or(a)          => a.fmt(f),
-            Node::None           => write!(f, "None")
+            Node::Chars(a) => a.fmt(f),
+            Node::And(a) => a.fmt(f),
+            Node::Or(a) => a.fmt(f),
+            Node::None => write!(f, "None")
         }
     }
 }
@@ -70,37 +70,37 @@ impl Node {
     /// **desc()** is like Debug or Display, but for branches it pretty-prints both the node and its descendents
     pub fn desc(&self, indent: usize) {
         match self {
-            Node::Chars(a)       => a.desc(indent),
-            Node::And(a)         => a.desc(indent),
-            Node::Or(a)          => a.desc(indent),
-            Node::None           => print!("{0:1$}", "None", indent),
+            Node::Chars(a) => a.desc(indent),
+            Node::And(a) => a.desc(indent),
+            Node::Or(a) => a.desc(indent),
+            Node::None => print!("{0:1$}", "None", indent),
         }
     }
         
     fn set_named(&mut self, named: Option<String>) {
         match self {
-            Node::Chars(a)       => a.named = named,
-            Node::And(a)         => a.named = named,
-            Node::Or(a)          => a.named = named,
-            Node::None           => panic!("No name for None node"),
+            Node::Chars(a) => a.named = named,
+            Node::And(a) => a.named = named,
+            Node::Or(a) => a.named = named,
+            Node::None => panic!("No name for None node"),
         };
     }
 
     fn named(&self) -> &Option<String> {
         match self {
-            Node::Chars(a)       => &a.named,
-            Node::And(a)         => &a.named,
-            Node::Or(a)          => &a.named,
-            Node::None           => panic!("No name for None node"),
+            Node::Chars(a) => &a.named,
+            Node::And(a) => &a.named,
+            Node::Or(a) => &a.named,
+            Node::None => panic!("No name for None node"),
         }
     }
 
     fn set_limits(&mut self, limits: Limits) {
         match self {
-            Node::Chars(a)       => a.limits = limits,
-            Node::And(a)         => a.limits = limits,
-            Node::Or(a)          => a.limits = limits,
-            Node::None           => panic!("No limits for None node"),
+            Node::Chars(a) => a.limits = limits,
+            Node::And(a) => a.limits = limits,
+            Node::Or(a) => a.limits = limits,
+            Node::None => panic!("No limits for None node"),
         };
     }
 
@@ -565,8 +565,14 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
     // wrap the string in "\(...\)" to make it an implicit AND node
     let anchor_front = input.starts_with('^');
     let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
-    chars.push_str(r"\)");
-    let mut outer_and = if alt_parser { AndNode::alt_parse_node(&mut chars)? } else { AndNode::parse_node(&mut chars)? };
+    let mut outer_and =
+        if alt_parser {
+            chars.push(')');
+            AndNode::alt_parse_node(&mut chars)?
+        } else {
+            chars.push_str(r"\)");
+            AndNode::parse_node(&mut chars)?
+        };
     if anchor_front {
         let and_node = AndNode::mut_from_node(&mut outer_and);
         and_node.anchor = true;
@@ -679,7 +685,10 @@ fn alt_parse(chars: &mut Peekable) -> Result<Node, Error> {
     let mut node = match chars.skip_whitespace().peek_n(4)[..] {
         [Some('a'), Some('n'), Some('d'), Some('(')] => AndNode::alt_parse_node(chars.consume(4))?,
         [Some('o'), Some('r'), Some('('), _] => OrNode::alt_parse_node(chars.consume(3))?,
-        [Some('"'), _, _, _] => CharsNode::alt_parse_node(chars.consume(1))?,
+        [Some('"'), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), &"\"")?,
+        [Some('\''), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), &"'")?,
+        [Some('t'), Some('x'), Some('t'), Some('(')] => CharsNode::alt_parse_node(chars.consume(4), &r")")?,
+        [_, _, _, _] => CharsNode::alt_parse_node(chars, &"")?,
         _ => return Err(Error::make(101, format!("Unexpected chars in regular expression: \"{}\"", chars.preview(6)).as_str()))
     };
     node.set_named(alt_parse_named(chars)?);
@@ -692,21 +701,53 @@ fn alt_parse(chars: &mut Peekable) -> Result<Node, Error> {
 
 impl CharsNode {
     const ALT_ESCAPE_CODES: &str = "adntluxo.$";
-    fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> { 
+    fn alt_parse_node(chars: &mut Peekable, terminate: &str) -> Result<Node, Error> { 
         if trace(2) { trace_enter("CHARS", chars); }
         let mut node = CharsNode { blocks: Vec::<CharsContents>::new(), limits: Limits::default(), named: None };
+        let mut nodes = Vec::<Node>::new();
         loop {
-            match chars.peek_2() {
-                (Some('"'), _) => { chars.consume(1); break; }
-                (Some('\\'), Some(ch1)) => node.push_char(chars.consume(1), CharsNode::ALT_ESCAPE_CODES.contains(ch1)),
-                (Some(_), _) => node.push_char(chars, false),
-                _ => { return Err(Error::make(100, "Unterminated CHARS unit")); },
+            let peek3 = chars.peek_n(3);
+            if terminate.is_empty() {
+                if peek3[0].unwrap_or('x') <= ' ' || peek3[1].is_none() { break; }
+            } else if chars.preview(3).starts_with(terminate) {
+                chars.consume(terminate.len());
+                break;
+            }
+            match peek3[..] {
+                [Some('\\'), Some(ch1), _] => node.push_char(chars.consume(1), CharsNode::ALT_ESCAPE_CODES.contains(ch1)),
+                [Some(_), _, _] => node.push_char(chars, false),
+                _ => { return Err(Error::make(100, "unterminated string")); },
+            }
+            if "?*+{".contains(chars.peek().unwrap_or('x')) {
+                node = node.handle_rep(chars, &mut nodes)?;
             }
         }
-        if node.blocks.is_empty() { return Ok(Node::None); }
-        Ok(Node::Chars(node).trace())
+        Ok(if nodes.is_empty() {
+            if node.blocks.is_empty() {Node::None}
+            else {Node::Chars(node).trace()}
+        } else {
+            nodes.push(Node::Chars(node));
+            Node::And(AndNode {nodes, limits: Limits::default(), named: None, anchor: false}).trace()
+        })
     }
 
+    fn handle_rep(mut self, chars: &mut Peekable, nodes: &mut Vec<Node>) -> Result<CharsNode, Error> {
+        let limits = Limits::parse(chars)?;
+        let block = self.blocks.pop().unwrap();
+        let new_node: Node;
+        if let CharsContents::Regular(mut string) = block {
+            let last_char = string.pop().unwrap();
+            if !string.is_empty() {
+                self.blocks.push(CharsContents::Regular(string));
+            }
+            new_node = Node::Chars( CharsNode{blocks: vec![CharsContents::Regular(format!("{}", last_char))], limits, named: None});
+        } else {
+            new_node = Node::Chars( CharsNode{ blocks: vec![block], limits, named: None});
+        }
+        if !self.blocks.is_empty() { nodes.push(Node::Chars(self)); }
+        nodes.push(new_node);
+        Ok(CharsNode { blocks: Vec::<CharsContents>::new(), limits: Limits::default(), named: None })
+    }
 }
 
 impl AndNode {
@@ -715,14 +756,18 @@ impl AndNode {
         if trace(2) { trace_enter("AND", chars); }
         let mut nodes = Vec::<Node>::new();
         loop {
-            match chars.peek_2() {
-                (None, _) => { return Err(Error::make(2, "Unterminated AND node")); },
-                (Some('\\'), Some(')')) => { break; },
-                _ => (),
+            match chars.next() {
+                None => { return Err(Error::make(2, "Unterminated AND node")); },
+                Some(')') => { break; },
+                Some(' ') |
+                Some('\n') |
+                Some('\t') => (),
+                Some(ch) => {
+                    chars.put_back(ch);
+                    nodes.push(alt_parse(chars)?);
+                }
             }
-            nodes.push(alt_parse(chars)?);
         }
-        chars.consume(2);        
         if nodes.is_empty() { Ok(Node::None) }
         else { Ok(Node::And(AndNode {nodes, limits: Limits::default(), named: None, anchor: false, }).trace()) }
     }
@@ -730,7 +775,25 @@ impl AndNode {
 }
 
 impl OrNode {
-    fn alt_parse_node(_chars: &mut Peekable) -> Result<Node, Error> { Ok(Node::None) }
+    fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> {
+        if trace(2) { trace_enter("OR", chars); }
+        let mut nodes = Vec::<Node>::new();
+        loop {
+            match chars.next() {
+                None => { return Err(Error::make(2, "Unterminated OR node")); },
+                Some(')') => { break; },
+                Some(' ') |
+                Some('\n') |
+                Some('\t') => (),
+                Some(ch) => {
+                    chars.put_back(ch);
+                    nodes.push(alt_parse(chars)?);
+                }
+            }
+        }
+        if nodes.is_empty() { Ok(Node::None) }
+        else { Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None, }).trace()) }
+    }        
 }
 
 /// Parses out the name from a named And

@@ -75,6 +75,8 @@ use clap::{Parser, value_parser};               // Command Line Argument Process
 const INTERACTIVE_DEFAULT: bool = false;
 /// default value for the **--tree** switch
 const PRINTTREE_DEFAULT: bool = false;
+/// default value for the **--walk** switch
+const PRINTWALK_DEFAULT: bool = false;
 /// default value for the **--debug** switch
 const DEBUG_DEFAULT: u32 = 0;
 /// default value for the **--Abbrev** switch
@@ -133,21 +135,25 @@ pub struct Config {
     /// String to search (required, unless --tree or --interactive)
     #[clap(default_value_t = String::from(""))]
     pub text: String,
+    /// Parser to use. Will accept abbreviations. Currently supported are 'traditional' and 'alternative'.
+    #[clap(short, long, default_value_t = String::from(PARSER_DEFAULT))]
+    pub parser: String, 
     /// Start up an interactive session (TODO)
     #[clap(short, long, default_value_t = INTERACTIVE_DEFAULT)]
     pub interactive: bool,
     /// Prints the parsed regexp tree
     #[clap(short, long, default_value_t = PRINTTREE_DEFAULT)]
     pub tree: bool,
-    /// Prints debug information during the WALK phase. 1 - 4 give progressively more data
+    /// Dumps the current path (the successful path, if called on the result of walk())
+    #[clap(short, long, default_value_t = PRINTWALK_DEFAULT)]
+    pub walk: bool,
+    /// Prints debug information. 1 - 8 give progressively more data
     #[clap(short, long, default_value_t = DEBUG_DEFAULT, value_parser=value_parser!(u32).range(0..40))]
     pub debug: u32,
     // length of text to display in the --debug output
-    /// Prints debug information during the WALK phase. 1 - 4 give progressively more data
+    /// When tracing the walk phase abbreviate the display of current string to LENGTH chars
     #[clap(short, long, default_value_t = ABBREV_DEFAULT, value_parser=value_parser!(u32).range(1..))]
-    pub abbrev: u32, 
-    #[clap(short, long, default_value_t = String::from(PARSER_DEFAULT))]
-    pub parser: String, 
+    pub abbrev: u32,
 }
 
 impl Config {
@@ -198,7 +204,14 @@ pub fn main() {
             //println!("{:?}", config);
             if !config.text.is_empty() {
                 match regexp::walk_tree(&tree, &config.text) {
-                    Ok(Some((path, char_start))) => { println!("{:?}", path); Report::new(&path, char_start).display(0)},
+                    Ok(Some((path, char_start))) => {
+                        if config.walk {
+                            println!("--- Walk:");
+                            path.dump(0);
+                            println!("--- End walk");
+                        }
+                        println!("{:?}", path); Report::new(&path, char_start).display(0);
+                }
                     Ok(None) => println!("No match"),
                     Err(error) => println!("{}", error)
                 }

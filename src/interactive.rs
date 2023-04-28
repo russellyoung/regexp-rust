@@ -120,8 +120,8 @@ impl Interactive {
         let stdin = io::stdin();
         let mut buffer;
         loop {
-            self.prompt();
             buffer = "".to_string();
+            self.prompt();
             match stdin.read_line(&mut buffer) {
                 Ok(0) => { break; },
                 Ok(1) => (),
@@ -154,6 +154,7 @@ impl Interactive {
     /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
     fn find_command(&mut self, input: &str) -> bool{
         let walk = walk_tree(&self.cmd_parse_tree, input);
+        println!("{:#?}", walk);
         if let Ok(Some((path, _))) = &walk {
             let report = Report::new(path, 0);
             let vars = report.get_named();
