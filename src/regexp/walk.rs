@@ -57,8 +57,6 @@ pub struct OrStep<'a> {
     which: usize,
 }
 
-trait Walker: Debug {}
-
 //////////////////////////////////////////////////////////////////
 //
 // Path struct

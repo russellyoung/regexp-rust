@@ -15,6 +15,7 @@ use crate::{trace, trace_indent, trace_change_indent, trace_set_indent, TAB_SIZE
 use crate::regexp::walk::Matched;
 use core::fmt::{Debug,};
 use std::collections::HashMap;
+use home;
 
 /// big number to server as a cap for repetition count
 const EFFECTIVELY_INFINITE: usize = 99999999;
@@ -43,7 +44,7 @@ const EFFECTIVELY_INFINITE: usize = 99999999;
 /// Node acts as a common wrapper for the different XNode struct types: CharsNode, SpecialCharNode, SetNode, AndNode, and OrNode.
 /// Besides serving as a common strcut to distribute message requests, it also behaves like Box in providing a place in memory for the structures to live.
 #[derive(PartialEq)]
-pub enum Node {Chars(CharsNode), And(AndNode), Or(OrNode), /*Set(SetNode),*/ None, }
+pub enum Node {Chars(CharsNode), And(AndNode), Or(OrNode), /*Set(SetNode),*/ Def(DefNode), None, }
 
 impl core::fmt::Debug for Node {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -51,11 +52,23 @@ impl core::fmt::Debug for Node {
             Node::Chars(a) => a.fmt(f),
             Node::And(a) => a.fmt(f),
             Node::Or(a) => a.fmt(f),
+            Node::Def(a) => a.fmt(f),
             Node::None => write!(f, "None")
         }
     }
 }
 
+impl Clone for Node {
+    fn clone(&self) -> Node {
+        match self {
+            Node::Chars(chars_node) => Node::Chars(chars_node.clone()),
+            Node::And(and_node) => Node::And(and_node.clone()),
+            Node::Or(or_node) => Node::Or(or_node.clone()),
+            Node::Def(def_node) => Node::Def(def_node.clone()),
+            Node::None => Node::None,
+        }
+    }
+}    
 impl Node {
     /// function that simply distributes a walk request to the proper XNode struct
     fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> {
@@ -63,6 +76,7 @@ impl Node {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, matched),
             Node::And(and_node) => walk::AndStep::walk(and_node, matched),
             Node::Or(or_node) => walk::OrStep::walk(or_node, matched),
+            Node::Def(def_node) => def_node.node.walk(matched),
             Node::None => panic!("NONE node should not be in final tree")
         }
     }
@@ -73,6 +87,7 @@ impl Node {
             Node::Chars(a) => a.desc(indent),
             Node::And(a) => a.desc(indent),
             Node::Or(a) => a.desc(indent),
+            Node::Def(a) => a.desc(indent),
             Node::None => print!("{0:1$}", "None", indent),
         }
     }
@@ -82,6 +97,7 @@ impl Node {
             Node::Chars(a) => a.named = named,
             Node::And(a) => a.named = named,
             Node::Or(a) => a.named = named,
+            Node::Def(a) => a.node.set_named(named),
             Node::None => panic!("No name for None node"),
         };
     }
@@ -91,6 +107,7 @@ impl Node {
             Node::Chars(a) => &a.named,
             Node::And(a) => &a.named,
             Node::Or(a) => &a.named,
+            Node::Def(a) => a.node.named(),
             Node::None => panic!("No name for None node"),
         }
     }
@@ -100,10 +117,10 @@ impl Node {
             Node::Chars(a) => a.limits = limits,
             Node::And(a) => a.limits = limits,
             Node::Or(a) => a.limits = limits,
+            Node::Def(a) => a.node.set_limits(limits),
             Node::None => panic!("No limits for None node"),
         };
     }
-
 
     /// checks whether the node is the special Node::None type, used to initialize structures and in case of errors. In general
     /// if the code finds this it means an error condition
@@ -114,8 +131,8 @@ impl Node {
     /// the *trace_enter()* call, which increases the indent when AND or OR are entered.
     fn trace(self) -> Self {
         if trace(2) {
-            match (&self, &self) {
-                (Node::And(_), _) | (_, Node::Or(_)) => trace_change_indent(-1),
+            match &self {
+                Node::Def(_) | Node::And(_) | Node::Or(_) => trace_change_indent(-1),
                 _ => ()
             }
             trace_indent();
@@ -131,7 +148,7 @@ fn trace_enter(name: &str, chars: &mut Peekable) {
     let chs = chars.peek_n(3);
     trace_indent();
     println!("{} starting from \"{}{}{}\"", name, chs[0].unwrap(), chs[1].unwrap(), chs[2].unwrap_or(' '));
-    if name == "AND" || name == "OR" { trace_change_indent(1); }
+    if name == "DEF" || name == "AND" || name == "OR" { trace_change_indent(1); }
 }
 
 //
@@ -167,6 +184,41 @@ pub struct OrNode {
     named: Option<String>,
 }
 
+// TODO: This should contain a ref to the node in the defs table, but this requires major lifeline changes which I'm
+// not ready to do now, so in the short term it should have its own copy
+#[derive(PartialEq)]
+pub struct DefNode {
+    name: String,
+    node: Box<Node>,
+}
+
+impl Default for DefNode {
+    fn default() -> DefNode  {DefNode { name: "".to_string(), node: Box::new(Node::None),  }  }
+}
+
+impl Clone for CharsNode {
+    fn clone(&self) -> CharsNode {
+        CharsNode{limits: self.limits, named: self.named.clone(), blocks: self.blocks.clone()}
+    }
+}
+
+impl Clone for AndNode {
+    fn clone(&self) -> AndNode {
+        AndNode{limits: self.limits, named: self.named.clone(), anchor: self.anchor, nodes: self.nodes.iter().map(|x|x.clone()).collect()}
+    }
+}
+
+impl Clone for OrNode {
+    fn clone(&self) -> OrNode {
+        OrNode{limits: self.limits, named: self.named.clone(), nodes: self.nodes.iter().map(|x|x.clone()).collect()}
+    }
+}
+impl Clone for DefNode {
+    fn clone(&self) -> DefNode {
+        DefNode{node: self.node.clone(), name: self.name.clone()}
+    }
+}
+
 //////////////////////////////////////////////////////////////////
 //
 // Node implementations
@@ -176,7 +228,7 @@ pub struct OrNode {
 //
 //////////////////////////////////////////////////////////////////
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 enum CharsContents {Regular(String), Special(char), Set(bool, Vec<SetUnit>), }
 impl Default for CharsContents { fn default() -> CharsContents { CharsContents::Regular("".to_string()) }}
 
@@ -271,7 +323,7 @@ impl CharsNode {
                         || chars.peek_2() == (Some('\\'), Some('|'))) {
             node.return_1(chars);
         }
-        Ok(Node::Chars(node).trace())
+        Ok(Node::Chars(node))
     }
     
     fn return_1(&mut self, chars: &mut Peekable) {
@@ -322,10 +374,7 @@ impl CharsNode {
         Some(total_len)
     }
     
-    fn desc(&self, indent: usize) {
-        print!("{0:1$}", "", indent);
-        println!("{:?}", self);
-    }
+    fn desc(&self, indent: usize) { print!("{0:1$}{2:?}", "", indent, self); }
     fn char_count(&self) -> usize { self.blocks.iter().map(|x| x.len()).sum() }
     fn match_len(&self) -> usize {
         self.char_count() - if self.blocks.iter().any(|b| b == &CharsContents::Special('$')) { 1 } else { 0 }
@@ -338,7 +387,7 @@ impl CharsNode {
 }    
 
 /// Used to represent the characters in a SET (represented in the RE by "[a-mxyz]" or "[^\da-g]"
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq, Clone)]
 enum SetUnit {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
 
 impl SetUnit {
@@ -452,21 +501,13 @@ impl AndNode {
                 (Some('\\'), Some(')')) => { break; },
                 _ => (),
             }
-            /*
-            match parse(chars, false)? {
-                (None, node) => nodes.push(node),
-                (Some(pre_node), node) => {
-                    nodes.push(pre_node);
-                    nodes.push(node);
-                }
-             */
             nodes.push(parse(chars, false)?);
         }
 
         // pop off terminating chars
         let (_, _) = (chars.next(), chars.next());
-        Ok((if nodes.is_empty() { Node::None }
-           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, named, anchor: false, })}).trace())
+        Ok(if nodes.is_empty() { Node::None }
+           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, named, anchor: false, })})
     }
 
     /// Parses out the name from a named And
@@ -503,8 +544,7 @@ impl AndNode {
     }
 
     fn desc(&self, indent: usize) {
-        print!("{0:1$}", "", indent);
-        println!("{:?}", self);
+        print!("{0:1$}{2:?}", "", indent, self);
         for i in 0..self.nodes.len() {
             self.nodes[i].desc(indent + TAB_SIZE);
         }
@@ -528,7 +568,7 @@ impl OrNode {
             next_node => nodes.push(next_node),
         };
         // TODO: change return type (extra value no longer needed)
-        Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None}).trace())
+        Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None}))
     }
     
     /// recovers an OrNode from the Node::Ar enum
@@ -538,14 +578,37 @@ impl OrNode {
     }
     
     fn desc(&self, indent: usize) {
-        print!("{0:1$}", "", indent);
-        println!("{:?}", self);
+        print!("{0:1$}{2:?}", "", indent, self);
         for i in 0..self.nodes.len() {
             self.nodes[i].desc(indent + TAB_SIZE);
         }
     }
 }
 
+impl Debug for DefNode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "DefNode({})", self.name, )
+    }
+}
+
+impl DefNode {
+    fn alt_parse_node(chars: &mut Peekable, defs: &Defs) -> Result<Node, Error> { 
+        if trace(2) { trace_enter("DEF", chars); }
+        let name = Defs::name_from_stream(chars, false);
+        if name.is_empty() { return Err(Error::make(100, "Missing required name for RE load")); }
+        if let Some(')') = chars.skip_whitespace().next() {}
+        else { return Err(Error::make(101, "Bad char in definition name")); }
+        if let Some(root) = defs.get(&name) {
+            Ok(Node::Def(DefNode{name, node: Box::new(root.clone())}))
+        } else { Err(Error::make(102, "Could not find node matching name")) }
+    }
+    fn desc(&self, indent: usize) {
+        print!("{0:1$}{2:?}", "", indent, self);
+        self.node.desc(indent + TAB_SIZE);
+    }
+
+    fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> { self.node.walk(matched) }
+}
 
 //////////////////////////////////////////////////////////////////
 //
@@ -567,8 +630,9 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
     let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
     let mut outer_and =
         if alt_parser {
+            let mut defs = Defs::default();
             chars.push_str(" )");
-            AndNode::alt_parse_node(&mut chars)?
+            AndNode::alt_parse_node(&mut chars, &mut defs)?
         } else {
             chars.push_str(r"\)");
             AndNode::parse_node(&mut chars)?
@@ -577,9 +641,11 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
         let and_node = AndNode::mut_from_node(&mut outer_and);
         and_node.anchor = true;
     }
-    outer_and.set_named(Some("".to_string()));
-    if chars.next().is_some() { Err(Error::make(5, "Extra characters after parse completed")) }
-    else { Ok(outer_and) }
+    if !outer_and.is_none() {
+        outer_and.set_named(Some("".to_string()));
+        if chars.next().is_some() { return Err(Error::make(5, "Extra characters after parse completed")); }
+    }
+    Ok(outer_and)
 }
 
 /// main controller for the tree parse processing, it looks at the next few characters in the pipeline, decides what they are, and
@@ -593,7 +659,7 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
     if node == Node::None { return Err(Error::make(9, format!("Parse error at \"{}\"", chars.preview(6)).as_str()));}
     if let (Some('\\'), Some('|')) = chars.peek_2() {
         Ok(OrNode::parse_node(chars.consume(2), node)?)
-    } else { Ok(node)}
+    } else { Ok(node.trace())}
 }
 
 /// This is the entrypoint to the phase 2, (tree walk) processing. It is put in this package to make it easier available, since loically it is
@@ -681,20 +747,27 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
 
 /// main controller for the tree parse processing, it looks at the next few characters in the pipeline, decides what they are, and
 /// distributes them to the proper XNode constructor function
-fn alt_parse(chars: &mut Peekable) -> Result<Node, Error> {
+fn alt_parse(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
     let mut node = match chars.skip_whitespace().peek_n(4)[..] {
-        [Some('a'), Some('n'), Some('d'), Some('(')] => AndNode::alt_parse_node(chars.consume(4))?,
-        [Some('o'), Some('r'), Some('('), _] => OrNode::alt_parse_node(chars.consume(3))?,
+        // define, insert, save, load definitions
+        [Some('d'), Some('e'), Some('f'), Some('(')] => defs.parse(chars.consume(4))?,
+        [Some('g'), Some('e'), Some('t'), Some('(')] => DefNode::alt_parse_node(chars.consume(4), defs)?,
+        [Some('u'), Some('s'), Some('e'), Some('(')] => defs.load(chars.consume(4))?,
+        // and, or, various text
+        [Some('a'), Some('n'), Some('d'), Some('(')] => AndNode::alt_parse_node(chars.consume(4), defs)?,
+        [Some('o'), Some('r'), Some('('), _] => OrNode::alt_parse_node(chars.consume(3), defs)?,
         [Some('"'), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), "\"")?,
         [Some('\''), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), "'")?,
         [Some('t'), Some('x'), Some('t'), Some('(')] => CharsNode::alt_parse_node(chars.consume(4), r")")?,
         [_, _, _, _] => CharsNode::alt_parse_node(chars, "")?,
         _ => return Err(Error::make(101, format!("Unexpected chars in regular expression: \"{}\"", chars.preview(6)).as_str()))
     };
-    node.set_named(alt_parse_named(chars)?);
-    node.set_limits(Limits::parse(chars)?);
-    if node.named().is_none() { 
+    if !node.is_none() {
         node.set_named(alt_parse_named(chars)?);
+        node.set_limits(Limits::parse(chars)?);
+        if node.named().is_none() { 
+            node.set_named(alt_parse_named(chars)?);
+        }
     }
     Ok(node.trace())
 }
@@ -724,10 +797,10 @@ impl CharsNode {
         }
         Ok(if nodes.is_empty() {
             if node.blocks.is_empty() {Node::None}
-            else {Node::Chars(node).trace()}
+            else {Node::Chars(node)}
         } else {
             nodes.push(Node::Chars(node));
-            Node::And(AndNode {nodes, limits: Limits::default(), named: None, anchor: false}).trace()
+            Node::And(AndNode {nodes, limits: Limits::default(), named: None, anchor: false})
         })
     }
 
@@ -752,7 +825,7 @@ impl CharsNode {
 
 impl AndNode {
     /// Recursively parses an AND node from the front of the Peekable stream
-    fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> {
+    fn alt_parse_node(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
         if trace(2) { trace_enter("AND", chars); }
         let mut nodes = Vec::<Node>::new();
         loop {
@@ -764,18 +837,21 @@ impl AndNode {
                 Some('\t') => (),
                 Some(ch) => {
                     chars.put_back(ch);
-                    nodes.push(alt_parse(chars)?);
+                    let node = alt_parse(chars, defs)?;
+                    if !node.is_none() {
+                        nodes.push(node);
+                    }
                 }
             }
         }
         if nodes.is_empty() { Ok(Node::None) }
-        else { Ok(Node::And(AndNode {nodes, limits: Limits::default(), named: None, anchor: false, }).trace()) }
+        else { Ok(Node::And(AndNode {nodes, limits: Limits::default(), named: None, anchor: false, })) }
     }
 
 }
 
 impl OrNode {
-    fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> {
+    fn alt_parse_node(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
         if trace(2) { trace_enter("OR", chars); }
         let mut nodes = Vec::<Node>::new();
         loop {
@@ -787,12 +863,15 @@ impl OrNode {
                 Some('\t') => (),
                 Some(ch) => {
                     chars.put_back(ch);
-                    nodes.push(alt_parse(chars)?);
+                    let node = alt_parse(chars, defs)?;
+                    if !node.is_none() {
+                        nodes.push(node);
+                    }
                 }
             }
         }
         if nodes.is_empty() { Ok(Node::None) }
-        else { Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None, }).trace()) }
+        else { Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None, })) }
     }        
 }
 
@@ -812,7 +891,114 @@ fn alt_parse_named(chars: &mut Peekable) -> Result<Option<String>, Error> {
     Ok(Some(chs.into_iter().collect()))
 }
 
+#[derive(Default)]
+struct Defs {
+    defs: HashMap<String, Node>,
+    load: Vec<String>,
+    loaded: Vec<String>,
+}
 
+impl Defs {
+    fn parse(&mut self, chars: &mut Peekable) -> Result<Node, Error>{
+        let name = Defs::name_from_stream(chars, false);
+        if name.is_empty() { return Err(Error::make(100, "Missing required name for RE definition")); }
+
+        if trace(2) { trace_indent(); println!("reading definition of {}", name); trace_change_indent(1); }
+        let mut nodes = Vec::<Node>::new();
+        loop {
+            let node = alt_parse(chars, self)?;
+            if !node.is_none() {
+                nodes.push(node);
+            }
+            chars.skip_whitespace();
+            if let Some(')') = chars.peek() {
+                chars.consume(1);
+                break;
+            }
+        }
+        if nodes.is_empty() { return Err(Error::make(202, "No valid definition found")) }
+        let root = if nodes.len() == 1 {
+            nodes.into_iter().next().unwrap()
+        } else {
+            Node::And(AndNode{limits: Limits::default(), named: None, anchor: false, nodes})
+        };
+        self.defs.insert(name, root);
+        if trace(2) { trace_change_indent(-1); trace_indent(); println!("finished definition"); }
+        Ok(Node::None)
+    }
+
+    fn get(&self, name: &str) -> Option<Node> {
+        if let Some(node) = self.defs.get(name) {Some(node.clone()) }
+        else { None}
+            /*
+        let name = Defs::name_from_stream(chars, false);
+        if name.is_empty() { return Err(Error::make(100, "Missing required name for RE load")); }
+        if let Some(')') = chars.skip_whitespace().next() {}
+        else { return Err(Error::make(101, "Bad char in definition name")); }
+//        if let Some(root) = self.defs.get(&name) { Ok(root.clone()) }
+        if let Some(root) = self.defs.get(&name) {
+            Ok(Node::Def(DefNode{name, node: Box::new(root.clone())}))
+        }
+        else { Err(Error::make(102, "Could not find node matching name")) }
+            */
+    }
+
+    fn load(&mut self, chars: &mut Peekable) -> Result<Node, Error> {
+        let path = Defs::path_from_stream(chars);
+        if let Some(')') = chars.skip_whitespace().next() {}
+        else {return Err(Error::make(202, "Malformed \"use\" statement"));}
+        if trace(1) { trace_indent(); println!("loading definitions from file '{:#?}'", path); trace_change_indent(1); }
+        
+        match std::fs::read_to_string(&path) {
+            Err(err) => { return Err(Error::make(202, format!("Error reading def file {}: {}", path, err.to_string()).as_str())) },
+            Ok(string) => {
+                let mut def_chars = Peekable::new(&string);
+                let _ = alt_parse(&mut def_chars, self)?;
+            }
+        }
+        if trace(1) {
+            if trace(2) { trace_indent(); println!("finished load of '{:#?}'", path);}
+            trace_change_indent(-1);
+        }
+        Ok(Node::None)
+        
+    }
+        
+    fn name_from_stream(chars: &mut Peekable, file: bool) -> String {
+        let mut name_v = Vec::<char>::new();
+        chars.skip_whitespace();
+        loop {
+            if let Some(ch) = chars.next() {
+                if ('a'..='z').contains(&ch)||
+                    ('A'..='Z').contains(&ch)||
+                    ('0'..='9').contains(&ch)||
+                    "_$#.".contains(ch) ||
+                    (file && "/~~".contains(ch))
+                {
+                    name_v.push(ch);
+                } else {
+                    chars.put_back(ch);
+                    break;
+                }
+            }
+        }
+        chars.skip_whitespace();
+        name_v.iter().collect::<String>()
+    }
+    
+    fn path_from_stream(chars: &mut Peekable) -> String {
+        let name = Defs::name_from_stream(chars, true);
+        let name = if name.is_empty() {"~/.regexp".to_string()} else { name };
+        if name[0..2].eq("~/") {
+            let home = home::home_dir();
+            let mut home_str = home.unwrap().display().to_string();
+            home_str.push_str(&name[1..]);
+            home_str
+        } else {
+            name.to_string()
+        }
+    }
+}
 
 //////////////////////////////////////////////////////////////////
 //

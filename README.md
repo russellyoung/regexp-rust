@@ -109,7 +109,7 @@ least consider positions that use Rust.
 Even though it's almost done, comments are still welcomed and
 encouraged. I promise to think about everything that comes in.
 
-## _Alternat Parser_
+## _Alternate Parser_
 
 ### Rationale
 
@@ -177,5 +177,9 @@ the following features:
      result containing one or more matches of UNIT;
      **_UNIT_(...)<name>+** will have one or more matches with the
      name "name"
-
+ - **Definitions**: commonly used sequences can be defined by using
+   the **def(...)** command. Once defined these can be used
+   repeatedly, optionally with custom name and repeat count. These can
+   also be included in files and read in by **use(...)**, allowing for
+   a library of common custom pieces.
  
