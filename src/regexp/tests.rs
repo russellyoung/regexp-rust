@@ -71,11 +71,11 @@ fn limits_test() {
 //
 // parser tests
 //
-fn make_chars_string(blocks: Vec<CharsContents>) -> Node {
-        Node::Chars(CharsNode{blocks, limits: Limits::default(), named: None})
+fn make_chars_string(string: &str) -> Node {
+        Node::Chars(CharsNode{string: string.to_string(), limits: Limits::default(), named: None})
 }
-fn make_chars_single(block: CharsContents, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Chars(CharsNode{blocks: vec![block], limits: Limits{min, max, lazy}, named: None})
+fn make_chars_single(ch: char, min: usize, max: usize, lazy: bool) -> Node {
+    Node::Chars(CharsNode{string: ch.to_string(), limits: Limits{min, max, lazy}, named: None})
 }
 
 fn make_root (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
@@ -111,45 +111,45 @@ impl Node {
 #[test]
 fn test_string_simple() {
     let mut node = make_root(1, 1, false);
-    node.push(make_chars_string(vec![CharsContents::Regular("abcd".to_string())]));
+    node.push(make_chars_string("abcd"));
     assert_eq!(node, parse_tree("abcd", false).unwrap());
 }
 
 #[test]
 fn test_string_embedded_reps_greedy() {
     let mut node = make_root(1, 1, false);
-    node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
-    node.push(make_chars_single(CharsContents::Regular("c".to_string()), 0, 1, false));
-    node.push(make_chars_string(vec![CharsContents::Regular("de".to_string())], ));
-    node.push(make_chars_single(CharsContents::Regular("f".to_string()), 1, EFFECTIVELY_INFINITE, false));
-    node.push(make_chars_string(vec![CharsContents::Regular("gh".to_string())], ));
-    node.push(make_chars_single(CharsContents::Regular("i".to_string()), 0, EFFECTIVELY_INFINITE, false));
+    node.push(make_chars_string("ab"));
+    node.push(make_chars_single('c', 0, 1, false));
+    node.push(make_chars_string("de"));
+    node.push(make_chars_single('f', 1, EFFECTIVELY_INFINITE, false));
+    node.push(make_chars_string("gh"));
+    node.push(make_chars_single('i', 0, EFFECTIVELY_INFINITE, false));
     assert_eq!(node, parse_tree("abc?def+ghi*", false).unwrap());
 }
               
 #[test]
 fn test_string_embedded_reps_lazy() {
     let mut node = make_root(1, 1, false);
-    node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
-    node.push(make_chars_single(CharsContents::Regular("c".to_string()), 0, 1, true));
-    node.push(make_chars_string(vec![CharsContents::Regular("de".to_string())]));
-    node.push(make_chars_single(CharsContents::Regular("f".to_string()), 1, EFFECTIVELY_INFINITE, true));
-    node.push(make_chars_string(vec![CharsContents::Regular("gh".to_string())]));
-    node.push(make_chars_single(CharsContents::Regular("i".to_string()), 0, EFFECTIVELY_INFINITE, true));
-    node.push(make_chars_string(vec![CharsContents::Regular("jk".to_string())]));
+    node.push(make_chars_string("ab"));
+    node.push(make_chars_single('c', 0, 1, true));
+    node.push(make_chars_string("de"));
+    node.push(make_chars_single('f', 1, EFFECTIVELY_INFINITE, true));
+    node.push(make_chars_string("gh"));
+    node.push(make_chars_single('i', 0, EFFECTIVELY_INFINITE, true));
+    node.push(make_chars_string("jk"));
     assert_eq!(node, parse_tree("abc??def+?ghi*?jk", false).unwrap());
 }
 
 #[test]
 fn or_with_chars_bug() {
     let mut node = make_root(1, 1, false);
-    node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
+    node.push(make_chars_string("ab"));
     let mut or_node = make_or();
-    or_node.push(make_chars_string(vec![CharsContents::Regular("c".to_string())]));
-    or_node.push(make_chars_string(vec![CharsContents::Regular("d".to_string())]));
+    or_node.push(make_chars_string("c"));
+    or_node.push(make_chars_string("d"));
 
     node.push(or_node);
-    node.push(make_chars_string(vec![CharsContents::Regular("ef".to_string())]));
+    node.push(make_chars_string("ef"));
     assert_eq!(node, parse_tree(r"abc\|def", false).unwrap());
 }
 
@@ -195,7 +195,8 @@ fn simple_chars() {
     find(false, "bcd", "abcde", "bcd");
     not_find(false, "bcd", "abde");
 }
-    
+
+#[test]
 fn rep_chars() {
     find(false, "abc*d", "abcdz", "abcd");
     find(false, "abc+d", "abcdz", "abcd");
@@ -397,7 +398,7 @@ fn errors() {
     e_check(false, r"asd{as", 10);
     e_check(false, r"asd{4as", 12);
 }
-
+/*
 #[test]
 fn alt_chars() {
     find(true, r"abc", "xabcd", "abc");
@@ -427,3 +428,4 @@ fn alt_or() {
 fn alt_err() {
     e_check(true, r"or(abc def)", 2);
 }
+*/

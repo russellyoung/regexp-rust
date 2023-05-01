@@ -36,6 +36,20 @@ pub struct CharsStep<'a> {
     matched: Matched<'a>,
 }
 
+/// Represents a single step for a SpecialNode (a special character)
+pub struct SpecialStep<'a> {
+    /// The node from phase 1
+    node: &'a SpecialNode,
+    matched: Matched<'a>,
+}
+
+/// Represents a single step for a RangeNode (ie [abcx-z])
+pub struct RangeStep<'a> {
+    /// The node from phase 1
+    node: &'a RangeNode,
+    matched: Matched<'a>,
+}
+
 /// Represents a single step for an AndNode (a collection of 0 or more nodes that all must match)
 pub struct AndStep<'a> {
     /// The node from phase 1
@@ -68,7 +82,7 @@ pub struct OrStep<'a> {
 /// Path fails it backtracks a Step and tries again.
 //
 //////////////////////////////////////////////////////////////////
-pub enum Path<'a> { Chars(Vec<CharsStep<'a>>),  And(Vec<AndStep<'a>>), Or(Vec<OrStep<'a>>), None }
+pub enum Path<'a> { Chars(Vec<CharsStep<'a>>),  Special(Vec<SpecialStep<'a>>), Range(Vec<RangeStep<'a>>), And(Vec<AndStep<'a>>), Or(Vec<OrStep<'a>>), None }
 
 impl<'a> Path<'a> {
     // basic methods
@@ -80,6 +94,8 @@ impl<'a> Path<'a> {
     pub fn len(&self) -> usize {
         match self {
             Path::Chars(steps) => steps.len(),
+            Path::Special(steps) => steps.len(),
+            Path::Range(steps) => steps.len(),
             Path::And(steps)   => steps.len(),
             Path::Or(steps)    => steps.len(),
             Path::None => 0,
@@ -112,10 +128,12 @@ impl<'a> Path<'a> {
     /// returns ths **Limit** object for the Path
     pub fn limits(&self) -> Limits {
         match self {
-            Path::Chars(steps) =>    steps[0].node.limits,
-            Path::And(steps) =>      steps[0].node.limits,
-            Path::Or(steps) =>       steps[0].node.limits,
-            Path::None =>            panic!("Accessign limits() of None node"),
+            Path::Chars(steps) => steps[0].node.limits,
+            Path::Special(steps) => steps[0].node.limits,
+            Path::Range(steps) => steps[0].node.limits,
+            Path::And(steps) => steps[0].node.limits,
+            Path::Or(steps) => steps[0].node.limits,
+            Path::None => panic!("Accessing limits() of None node"),
         }
     }
 
@@ -123,6 +141,8 @@ impl<'a> Path<'a> {
     fn first_last(&self) -> (&Matched, &Matched) {
         match self {
             Path::Chars(steps) =>    (&steps[0].matched, &steps.last().unwrap().matched),
+            Path::Special(steps) =>    (&steps[0].matched, &steps.last().unwrap().matched),
+            Path::Range(steps) =>    (&steps[0].matched, &steps.last().unwrap().matched),
             Path::And(steps) =>      (&steps[0].matched, &steps.last().unwrap().matched),
             Path::Or(steps) =>       (&steps[0].matched, &steps.last().unwrap().matched),
             Path::None => panic!("NONE unexpected"),
@@ -136,6 +156,24 @@ impl<'a> Path<'a> {
         if limits.lazy {
             match self {
                 Path::Chars(steps) => {
+                    if limits.check(steps.len() + 1) == 0 {
+                        if let Some(next_step) = steps.last().unwrap().step() {
+                            steps.push(next_step);
+                            ret = true;
+                        }
+                    }
+                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret); }
+                },
+                Path::Special(steps) => {
+                    if limits.check(steps.len() + 1) == 0 {
+                        if let Some(next_step) = steps.last().unwrap().step() {
+                            steps.push(next_step);
+                            ret = true;
+                        }
+                    }
+                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret); }
+                },
+                Path::Range(steps) => {
                     if limits.check(steps.len() + 1) == 0 {
                         if let Some(next_step) = steps.last().unwrap().step() {
                             steps.push(next_step);
@@ -173,7 +211,17 @@ impl<'a> Path<'a> {
                 Path::Chars(steps) => {
                     let _last_step = steps.pop().unwrap();
                     ret = limits.check(steps.len()) == 0;
-                    if trace(6) { trace_indent(); println!("back off Path: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret); }
+                    if trace(6) { trace_indent(); println!("back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret); }
+                },
+                Path::Special(steps) => {
+                    let _last_step = steps.pop().unwrap();
+                    ret = limits.check(steps.len()) == 0;
+                    if trace(6) { trace_indent(); println!("back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret); }
+                },
+                Path::Range(steps) => {
+                    let _last_step = steps.pop().unwrap();
+                    ret = limits.check(steps.len()) == 0;
+                    if trace(6) { trace_indent(); println!("back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret); }
                 },
                 Path::And(steps) => {
                     let mut last_step = steps.pop().unwrap();
@@ -241,6 +289,26 @@ impl<'a> Path<'a> {
                     if subreport.name.is_some() { reports.push(subreport); }
                 }
             },
+            Path::Special(steps) => {
+                let mut iter = steps.iter();
+                // There is an entry for 0 in the list, if there are others pop them off
+                if steps.len() > 1 { let _ = iter.next(); }
+                for step in iter {
+                    let (subreport, pos) = step.make_report(char_pos);
+                    char_pos = pos;
+                    if subreport.name.is_some() { reports.push(subreport); }
+                }
+            },
+            Path::Range(steps) => {
+                let mut iter = steps.iter();
+                // There is an entry for 0 in the list, if there are others pop them off
+                if steps.len() > 1 { let _ = iter.next(); }
+                for step in iter {
+                    let (subreport, pos) = step.make_report(char_pos);
+                    char_pos = pos;
+                    if subreport.name.is_some() { reports.push(subreport); }
+                }
+            },
             Path::None => panic!("Should not be any None path when compiling report"),
         }
         (reports, char_pos)
@@ -249,6 +317,14 @@ impl<'a> Path<'a> {
     pub fn dump(&self, indent: usize) {
         match self {
             Path::Chars(steps) => {
+                if steps.len() == 1 { steps[0].dump(indent); }
+                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
+            },
+            Path::Special(steps) => {
+                if steps.len() == 1 { steps[0].dump(indent); }
+                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
+            },
+            Path::Range(steps) => {
                 if steps.len() == 1 { steps[0].dump(indent); }
                 else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
             },
@@ -319,6 +395,18 @@ impl<'a> Debug for CharsStep<'a> {
     }
 }
 
+impl<'a> Debug for SpecialStep<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{{{:?}}}, string {} len {}", self.node, self.matched.abbrev(), self.matched.len())
+    }
+}
+
+impl<'a> Debug for RangeStep<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{{{:?}}}, string {} len {}", self.node, self.matched.abbrev(), self.matched.len())
+    }
+}
+
 impl<'a> Debug for AndStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut child_counts: String = "".to_string();
@@ -348,6 +436,14 @@ impl<'a> Debug for Path<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Path::Chars(steps) =>    {
+                if steps.is_empty() { write!(f, "Path Chars, reps 0, match \"\"") }
+                else {write!(f, "Path {:?}, steps {}, match \"{}\"", steps[steps.len() - 1].node, self.len(), self.matched_string())}
+            },
+            Path::Special(steps) =>    {
+                if steps.is_empty() { write!(f, "Path Special, reps 0, match \"\"") }
+                else {write!(f, "Path {:?}, steps {}, match \"{}\"", steps[steps.len() - 1].node, self.len(), self.matched_string())}
+            },
+            Path::Range(steps) =>    {
                 if steps.is_empty() { write!(f, "Path Chars, reps 0, match \"\"") }
                 else {write!(f, "Path {:?}, steps {}, match \"{}\"", steps[steps.len() - 1].node, self.len(), self.matched_string())}
             },
@@ -396,6 +492,96 @@ impl<'a> CharsStep<'a> {
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<CharsStep<'a>> {
         let mut step = CharsStep {node: self.node, matched: self.matched.next(0)};
+        if step.matched.end == step.matched.full_string.len() { return None; }
+        if let Some(size) = step.node.matches(step.matched.unterminated()) {
+            step.matched.move_end(size as isize);
+            Some(step)
+        } else { None }
+    }
+
+    /// Compiles a **Report** object from this path and its children after a successful search
+    fn make_report(&self, char_start: usize) -> (Report, usize) {
+        let matched_string = &self.matched.string();
+        let char_len = self.matched.len_chars();
+        (Report {found: matched_string.to_string(),
+                 name: self.node.named.clone(),
+                 pos: (char_start, char_start + char_len),
+                 bytes: (self.matched.start, self.matched.end),
+                 subreports: Vec::<Report>::new()},
+                 char_start + char_len)
+    }
+
+    fn dump(&self, indent: usize) {
+        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+    }
+}
+
+impl<'a> SpecialStep<'a> {
+    /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
+    pub fn walk(node: &'a SpecialNode, matched: Matched<'a>) -> Path<'a> {
+        let mut steps = vec![SpecialStep {node, matched}];
+        trace_start_walk(&steps);
+        for _i in 1..=node.limits.initial_walk_limit() {
+            match steps.last().unwrap().step() {
+                Some(s) => {
+                    steps.push(s);
+                    trace_pushing::<SpecialStep>(steps.last().unwrap(), steps.len());
+                },
+                None => break,
+            }
+        }
+        trace_end_walk(Path::Special(steps))
+    }
+
+    // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
+    /// try to take a single step over a string of regular characters
+    fn step(&self) -> Option<SpecialStep<'a>> {
+        let mut step = SpecialStep {node: self.node, matched: self.matched.next(0)};
+//        if step.matched.end == step.matched.full_string.len() { return None; }
+        if let Some(size) = step.node.matches(step.matched.unterminated()) {
+            step.matched.move_end(size as isize);
+            Some(step)
+        } else { None }
+    }
+
+    /// Compiles a **Report** object from this path and its children after a successful search
+    fn make_report(&self, char_start: usize) -> (Report, usize) {
+        let matched_string = &self.matched.string();
+        let char_len = self.matched.len_chars();
+        (Report {found: matched_string.to_string(),
+                 name: self.node.named.clone(),
+                 pos: (char_start, char_start + char_len),
+                 bytes: (self.matched.start, self.matched.end),
+                 subreports: Vec::<Report>::new()},
+                 char_start + char_len)
+    }
+
+    fn dump(&self, indent: usize) {
+        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+    }
+}
+
+impl<'a> RangeStep<'a> {
+    /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
+    pub fn walk(node: &'a RangeNode, matched: Matched<'a>) -> Path<'a> {
+        let mut steps = vec![RangeStep {node, matched}];
+        trace_start_walk(&steps);
+        for _i in 1..=node.limits.initial_walk_limit() {
+            match steps.last().unwrap().step() {
+                Some(s) => {
+                    steps.push(s);
+                    trace_pushing::<RangeStep>(steps.last().unwrap(), steps.len());
+                },
+                None => break,
+            }
+        }
+        trace_end_walk(Path::Range(steps))
+    }
+
+    // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
+    /// try to take a single step over a string of regular characters
+    fn step(&self) -> Option<RangeStep<'a>> {
+        let mut step = RangeStep {node: self.node, matched: self.matched.next(0)};
         if step.matched.end == step.matched.full_string.len() { return None; }
         if let Some(size) = step.node.matches(step.matched.unterminated()) {
             step.matched.move_end(size as isize);
