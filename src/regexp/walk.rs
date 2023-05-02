@@ -17,7 +17,7 @@ use crate::{trace, trace_indent, trace_change_indent};
 // trtee and to build the Report structure for the caller.
 //
 //////////////////////////////////////////////////////////////////
-#[derive(Debug,Copy)]
+#[derive(Copy)]
 pub struct Matched<'a> {
     /// the String where this match starts
     pub full_string: &'a str,
@@ -29,6 +29,11 @@ pub struct Matched<'a> {
     pub char_start: usize,
 }
 
+impl<'a> Debug for Matched<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "match \"{}\" [{}-{}) from {}", self.string(), self.start, self.end, self.abbrev())
+    }
+}
 /// Represents a single step for a CharsNode (a string of regular characters)
 pub struct CharsStep<'a> {
     /// The node from phase 1
@@ -314,31 +319,29 @@ impl<'a> Path<'a> {
         (reports, char_pos)
     }
 
-    pub fn dump(&self, indent: usize) {
+    pub fn dump(&self, mut indent: usize) {
+        if indent == 0 { trace_indent(); println!("PATH {} ------------", self.node_type()); indent = 1;}
         match self {
-            Path::Chars(steps) => {
-                if steps.len() == 1 { steps[0].dump(indent); }
-                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
-            },
-            Path::Special(steps) => {
-                if steps.len() == 1 { steps[0].dump(indent); }
-                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
-            },
-            Path::Range(steps) => {
-                if steps.len() == 1 { steps[0].dump(indent); }
-                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
-            },
-            Path::And(steps) => {
-                if steps.len() == 1 { steps[0].dump(indent); }
-                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
-            },
-            Path::Or(steps) => {
-                if steps.len() == 1 { steps[0].dump(indent); }
-                else  { steps.iter().skip(1).for_each(|x|  x.dump(indent))}
-            },
-            Path::None => panic!("NONE unexpected in Path::dump()"),
+            //Path::Chars(steps) => { for i in 0..steps.len() {steps[i].dump(i, indent)}},
+            Path::Chars(steps) => steps.iter().enumerate().for_each(|x| x.1.dump(x.0, indent)),
+            Path::Special(steps) => steps.iter().enumerate().for_each(|x| x.1.dump(x.0, indent)),
+            Path::Range(steps) =>  steps.iter().enumerate().for_each(|x| x.1.dump(x.0, indent)),
+            Path::And(steps) => steps.iter().enumerate().for_each(|x| x.1.dump(x.0, indent)),
+            Path::Or(steps) => steps.iter().enumerate().for_each(|x| x.1.dump(x.0, indent)),
+            Path::None => { trace_indent(); println!("|{0:1$}0: NONE \"\"", "", 4*indent, )},
         }
-    }   
+        if indent == 1 { trace_indent(); println!("PATH {} ------------", self.node_type()); }
+    }
+    pub fn node_type(&self) -> &str {
+        match self {
+            Path::Chars(_) => "Chars",
+            Path::Special(_) => "Special", 
+            Path::Range(_) => "Range",
+            Path::And(_) => "And",
+            Path::Or(_) => "Or",
+            Path::None => "None",
+        }
+    }
 }
 
 /// Trace Levels
@@ -365,6 +368,7 @@ fn trace_end_walk(path: Path) -> Path {
             let ok = if path.limits().check(path.len()) == 0 { format!("matches \"{}\"", path.matched_string())} else { "no match".to_string()};
             println!("End walk for {:?}, {} steps, {}", path, path.len() - 1, ok);
         }
+        if trace(10) { path.dump(0); }
     }
     path
 }
@@ -379,7 +383,7 @@ fn trace_pushing<T: Debug>(obj: &T, len: usize) {
 fn trace_new_step(and_step: &AndStep) {
     if trace(5) {
         trace_indent();
-        println!("-- new step in AND: {:?}", and_step);
+        println!("-- new child step in AND: {:?}", and_step);
     }
 }
 
@@ -391,19 +395,19 @@ fn trace_new_step(and_step: &AndStep) {
 //////////////////////////////////////////////////////////////////
 impl<'a> Debug for CharsStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{{{:?}}}, string {} len {}", self.node, self.matched.abbrev(), self.matched.len())
+        write!(f, "{{{:?}}}, {:?}", self.node, self.matched)
     }
 }
 
 impl<'a> Debug for SpecialStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{{{:?}}}, string {} len {}", self.node, self.matched.abbrev(), self.matched.len())
+        write!(f, "{{{:?}}}, {:?}", self.node, self.matched)
     }
 }
 
 impl<'a> Debug for RangeStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{{{:?}}}, string {} len {}", self.node, self.matched.abbrev(), self.matched.len())
+        write!(f, "{{{:?}}}, {:?}", self.node, self.matched)
     }
 }
 
@@ -412,23 +416,22 @@ impl<'a> Debug for AndStep<'a> {
         let mut child_counts: String = "".to_string();
         for p in self.child_paths.iter() { child_counts.push_str(&format!("{}, ", p.len())); }
         for _i in self.child_paths.len()..self.node.nodes.len() { child_counts.push_str("-, "); }
-        write!(f, "{{{:?}}} state [{}], matching \"{}\", string {} len {}",
+        write!(f, "{{{:?}}} state [{}], {:?}",
                self.node,
                child_counts,
-               self.matched.string(),
-               self.matched.abbrev(),
-               self.matched.len())
+               self.matched)
     }
 }
 
 impl<'a> Debug for OrStep<'a> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{{{:?}}}, branch {}, branch reps {}, string {} len {}",
+        write!(f, "{{{:?}}}, branch {} of {}, branch reps {}, {:?} ",
                self.node,
-               self.which,
+               self.which + 1,
+               self.node.nodes.len(),
                self.child_path.len(),
-               self.matched.abbrev(),
-               self.matched.len())
+               self.matched
+               )
     }
 }
 
@@ -511,8 +514,8 @@ impl<'a> CharsStep<'a> {
                  char_start + char_len)
     }
 
-    fn dump(&self, indent: usize) {
-        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+    fn dump(&self, rank: usize, indent: usize) {
+        trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self);
     }
 }
 
@@ -556,8 +559,8 @@ impl<'a> SpecialStep<'a> {
                  char_start + char_len)
     }
 
-    fn dump(&self, indent: usize) {
-        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+    fn dump(&self, rank: usize, indent: usize) {
+        trace_indent(); println!("|{0:1$}{2}: {3:?} ", "", 4*indent, rank, self,);
     }
 }
 
@@ -601,8 +604,8 @@ impl<'a> RangeStep<'a> {
                  char_start + char_len)
     }
 
-    fn dump(&self, indent: usize) {
-        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+    fn dump(&self, rank: usize, indent: usize) {
+        trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self);
     }
 }
 
@@ -638,12 +641,14 @@ impl<'a> AndStep<'a> {
             let child_path = step.node.nodes[child_len].walk(step.matched.next(0));
             if child_path.limits().check(child_path.len()) == 0 {
                 step.child_paths.push(child_path);
+                // This could be done by removing the "else" below, but putting it here makes the trace up-to-date
+                step.matched.set_end(step.child_paths.last().unwrap().end());
                 trace_new_step(&step);
             } else if !step.back_off() {
                 return None;
             } else {
+                step.matched.set_end(step.child_paths.last().unwrap().end());
             }
-            step.matched.set_end(step.child_paths.last().unwrap().end());
         }
         Some(step)
     }
@@ -656,7 +661,10 @@ impl<'a> AndStep<'a> {
     /// or pop off the last step, but cannot change anything inside any of the *Step**s. **XXXStep::back_off()** ,
     /// on the other hand, should only change things within the current Step, that is 
     fn back_off(&mut self) -> bool {
-        if trace(6) { trace_change_indent(1); }
+        if trace(6) {
+            trace_indent(); println!("back off Node: {:?}", self);
+            trace_change_indent(1);
+        }
         let limits = self.node.limits;
         let mut ret = true;
         if limits.lazy {
@@ -679,8 +687,13 @@ impl<'a> AndStep<'a> {
                 }
             };
         }
-        if ret { self.matched.set_end(self.child_paths.last().unwrap().end()); }
-        if trace(6) { trace_change_indent(-1); }
+        if ret {
+            self.matched.set_end(self.child_paths.last().unwrap().end());
+        }
+        if trace(6) {
+            trace_change_indent(-1);
+            trace_indent(); println!("back off Node: {}: {:?}", ret, self);
+        }
         ret
     }
     
@@ -701,8 +714,8 @@ impl<'a> AndStep<'a> {
          char_end)
     }
 
-    pub fn dump(&self, indent: usize) {
-        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+    pub fn dump(&self, rank: usize, indent: usize) {
+        trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self, );
         self.child_paths.iter().for_each(|x| x.dump(indent + 1));
     }
         
@@ -733,7 +746,7 @@ impl<'a> OrStep<'a> {
         };
         loop {
             if step.which == step.node.nodes.len() {
-                if trace(4) { trace_indent(); println!("    OR step failed"); }
+                if trace(4) { trace_indent(); println!("OR step failed (exhausted)"); }
                 return None;
             }
             step.child_path = Box::new(step.node.nodes[step.which].walk(self.matched.next(0)));
@@ -746,18 +759,34 @@ impl<'a> OrStep<'a> {
     }
 
     fn back_off(&mut self) -> bool {
-        let limits = self.node.limits;
+        if trace(6) {
+            trace_indent(); println!("back off Node: {:?}", self);
+            trace_change_indent(1);
+        }
+        let mut ret;
         loop {
-            if self.child_path.back_off() { break; }
+            if self.child_path.back_off() {
+                ret = "true: child backed off";
+                break;
+            }
+            if trace(6) { trace_indent(); println!("back off (next option){:?}", self); }
             self.which += 1;
-            if self.which >= self.node.nodes.len() { return false; }
-            self.child_path = Box::new(self.node.nodes[self.which].walk(self.matched.next(0)));
-            if limits.check(self.child_path.len()) != 0 {
-                return false;   // backed off until reps are too few, discard
+            self.matched.set_end(self.matched.start);
+            if self.which >= self.node.nodes.len() {
+                ret = "false: exhausted";
+                break;
+            }
+            self.child_path = Box::new(self.node.nodes[self.which].walk(self.matched));
+            if self.child_path.limits().check(self.child_path.len()) == 0 {
+                ret = "true: next option"; 
+                break;
             }
         }
-        self.matched.set_end(self.child_path.end());
-        true
+        if trace(6) { trace_change_indent(-1); trace_indent(); println!("back off Node: {}: {:?}", ret, self); }
+        if !self.child_path.is_empty() {
+            self.matched.set_end(self.child_path.end());
+        }
+        ret.starts_with("true")
     }
     
     /// Compiles a **Report** object from this path and its child after a successful search
@@ -771,8 +800,8 @@ impl<'a> OrStep<'a> {
          char_end)
     }
 
-    pub fn dump(&self, indent: usize) {
-        println!("{0:1$}{2:?} matches \"{3}\"", "", 4*indent, self.node, self.matched.string());
+    pub fn dump(&self, rank: usize, indent: usize) {
+        trace_indent(); println!("|{0:1$}{2}: {3:?} {4} of {5}", "", 4*indent, rank, self, self.which, self.node.nodes.len());
         self.child_path.dump(indent + 1);
     }
 }
