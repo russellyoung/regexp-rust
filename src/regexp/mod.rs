@@ -374,7 +374,7 @@ impl Range {
 }
 impl std::fmt::Display for Range {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "({}, {})", self.from, self.to)
+        write!(f, "{}-{}", self.from, self.to)
     }
 }
 
@@ -391,14 +391,14 @@ impl Debug for RangeNode {
 impl RangeNode {
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let mut node = RangeNode::default();
-        if trace(2) { trace_enter("SPECIAL", chars); }
+        if trace(2) { trace_enter("RANGE", chars); }
         if let Some('^') = chars.peek() {
             chars.consume(1);
             node.not = true;
         }
         loop {
             match chars.peek_n(3)[..] {
-                [Some(']'), _, _] => { break; },
+                [Some(']'), _, _] => { chars.consume(1); break; },
                 [Some('\\'), Some(ch1), _] => {
                     node.chars.push(RangeNode::escapes(ch1));
                     chars.consume(2);
@@ -412,7 +412,7 @@ impl RangeNode {
                     node.ranges.push(Range {from: ch0, to: ch2});
                     chars.consume(3);
                 },
-                [Some(ch0), _, ] => node.chars.push(ch0),
+                [Some(_), _, _, ] => node.chars.push(chars.next().unwrap()),
                 _ => { return Err(Error::make(9, "Unterminated range")); },
             }
         }
@@ -456,7 +456,7 @@ impl std::fmt::Display for RangeNode {
         for x in self.ranges.iter() {
             string.push_str(x.to_string().as_str());
         }
-        write!(f, "{}", string)
+        write!(f, "{}]", string)
     }
 }
 
@@ -764,7 +764,6 @@ impl CharsNode {
                             chars_node = CharsNode::default();
                         }
                         new_node = Node::Chars( CharsNode { string: String::from(ch), named: None, limits});
-                        println!("assign limits {:#?}", new_node);
                     } else {
                         return Err(Error::make(103, "Repetition count with no node (should not happen)"));
                     }
@@ -893,7 +892,7 @@ impl DefNode {
     fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> { self.node.walk(matched) }
 }
 
-#[derive(Default)]
+#[derive(Default,Debug)]
 struct Defs {
     defs: HashMap<String, Node>,
     load: Vec<String>,
@@ -903,8 +902,8 @@ struct Defs {
 impl Defs {
     fn parse(&mut self, chars: &mut Peekable) -> Result<Node, Error>{
         let name = Defs::name_from_stream(chars, false);
-        if name.is_empty() { return Err(Error::make(111, "Missing required name for RE definition")); }
-
+        if let Some(':') = chars.next() {}
+        else {return Err(Error::make(111, "Missing required name for RE definition")); }
         if trace(2) { trace_indent(); println!("reading definition of {}", name); trace_change_indent(1); }
         let mut nodes = Vec::<Node>::new();
         loop {
@@ -938,12 +937,26 @@ impl Defs {
         if let Some(')') = chars.skip_whitespace().next() {}
         else {return Err(Error::make(113, "Malformed \"use\" statement"));}
         if trace(1) { trace_indent(); println!("loading definitions from file '{:#?}'", path); trace_change_indent(1); }
-        
+
         match std::fs::read_to_string(&path) {
             Err(err) => { return Err(Error::make(114, format!("Error reading def file {}: {}", path, err).as_str())) },
             Ok(string) => {
                 let mut def_chars = Peekable::new(&string);
-                let _ = alt_parse(&mut def_chars, self)?;
+                while def_chars.skip_whitespace().peek().is_some() {
+                    if def_chars.peek() != Some('#'){
+                        if let Node::Def(def_node) = alt_parse(&mut def_chars, self)? {
+                            if trace(2) { trace_indent(); println!("Read definition of {} from {}", def_node.name, path); }
+                        }
+                    } else {
+                        loop {
+                            match def_chars.next() {
+                                Some('\n') | 
+                                None => { break;},
+                                _ => ()
+                            }
+                        }
+                    }
+                }
             }
         }
         if trace(1) {
@@ -1283,12 +1296,10 @@ impl<'a> Peekable<'a> {
 
     /// (as the name says) skips over whitespace at the front of the stream
     pub fn skip_whitespace(&mut self) -> &mut Self {
-        loop {
-            if let Some(ch) = self.next() {
-                if !" \n\t".contains(ch) {
-                    self.put_back(ch);
-                    break;
-                }
+        while let Some(ch) = self.next() {
+            if !" \n\t".contains(ch) {
+                self.put_back(ch);
+                break;
             }
         }
         self

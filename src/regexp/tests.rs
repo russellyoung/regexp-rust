@@ -416,6 +416,16 @@ fn alt_chars() {
     find(true, r"ab*c", "xabbbbcd", "abbbbc");
     find(true, r"a\dc", "xa9cd", "a9c");
     find(true, r"a\d*c", "xacd", "ac");
+    find(true, r"a[vx-z]*c", "xavxyzcd", "avxyzc");
+    find(true, r"a[vx-z]*c", "xacd", "ac");
+    find(true, r"'abcd'+", "xabcdabcdabc", "abcdabcd");
+    find(true, r"'abcd*'", "xabcabcdabc", "abc");
+
+    find(true, r"a\l*", "abcDefg", "abc");
+    find(true, r"a\u*", "aBCDEfg", "aBCDE");
+    find(true, r"a\x*", "a09bcDefg", "a09bcDef");
+    find(true, r"a\o*", "a0123456789", "a01234567");
+    find(true, r"a\a*", "a.+你好", "a.+");
 }
 
 #[test]
@@ -425,6 +435,15 @@ fn alt_or() {
     find(true, r"or(a{3} y+ z )", "aayx", "y");
     find(true, r"or(a{3} y+ z )", "aaayyz", "aaa");
     find(true, r"or(a{3} y+ z )", "aazayyz", "z");
+    find(true, r"or(a* y+ z )yz", "aayyyz", "yyyz");
+}
+
+#[test]
+fn alt_def() {
+    find(true, "def(a: 'xyz') w get(a)", "vwxyz", "wxyz");
+    find(true, "def(a: 'xyz') w get(a) get(a)", "vwxyzxyz", "wxyzxyz");
+    find(true, "use(src/regexp/test.re) a get(a)", "aabcdef", "abcd");
+    find(true, "use(src/regexp/test.re) a get(z)+", "aawxyzwx", "awxyzwx");
 }
 
 #[test]
@@ -439,8 +458,8 @@ fn alt_err() {
     e_check(true, r"get(a) ", 108);
     // there is no 109
     e_check(true, r"and(asd )<xy ", 110);
-    e_check(true, r"def()", 111);
-    e_check(true, r"def(asd)", 112);
+    e_check(true, r"def(asd)", 111);
+    e_check(true, r"def(asd:)", 112);
     e_check(true, r"use(asd()", 113);
     e_check(true, r"use(no-such-file)", 114);
 }

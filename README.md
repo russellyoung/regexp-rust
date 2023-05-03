@@ -113,7 +113,7 @@ encouraged. I promise to think about everything that comes in.
 
 ### Rationale
 
-While trying to handle some of the idiosycnracies of traditional
+While trying to handle some of the idiosyncracies of traditional
 regular expressions I realized that a more logically designed language
 makes a lot of sense. The particulars of **or**, no way to group
 characters save using an **AND** node, and **OR**s and repetitions
