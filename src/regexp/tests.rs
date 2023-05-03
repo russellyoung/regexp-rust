@@ -72,20 +72,20 @@ fn limits_test() {
 // parser tests
 //
 fn make_chars_string(string: &str) -> Node {
-        Node::Chars(CharsNode{string: string.to_string(), limits: Limits::default(), named: None})
+        Node::Chars(CharsNode{string: string.to_string(), limits: Limits::default(), named: None, name_outside: false})
 }
 fn make_chars_single(ch: char, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Chars(CharsNode{string: ch.to_string(), limits: Limits{min, max, lazy}, named: None})
+    Node::Chars(CharsNode{string: ch.to_string(), limits: Limits{min, max, lazy}, named: None, name_outside: false})
 }
 
 fn make_root (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
 
 fn make_and (min: usize, max: usize, lazy: bool, name: Option<&str>) -> Node {
     let named = name.map(|n| n.to_string());
-    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, named, anchor: false})
+    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, named, anchor: false, name_outside: false})
 }
 fn make_or() -> Node {
-    Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default(), named: None})
+    Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default(), named: None, name_outside: false})
 }
 
 //fn make_set(not: bool, targets: Vec<SetUnit>, min: usize, max: usize, lazy: bool) -> Node {
@@ -418,6 +418,7 @@ fn alt_chars() {
     find(true, r"a\d*c", "xacd", "ac");
     find(true, r"a[vx-z]*c", "xavxyzcd", "avxyzc");
     find(true, r"a[vx-z]*c", "xacd", "ac");
+    find(true, r"a[^vx-z]", "avaxayazawa", "aw");
     find(true, r"'abcd'+", "xabcdabcdabc", "abcdabcd");
     find(true, r"'abcd*'", "xabcabcdabc", "abc");
 
@@ -444,6 +445,7 @@ fn alt_def() {
     find(true, "def(a: 'xyz') w get(a) get(a)", "vwxyzxyz", "wxyzxyz");
     find(true, "use(src/regexp/test.re) a get(a)", "aabcdef", "abcd");
     find(true, "use(src/regexp/test.re) a get(z)+", "aawxyzwx", "awxyzwx");
+    find(true, r"def(a: x ){3} get(a) b get(a){4}", "zxxxxbxxxxxx", "xxxbxxxx");
 }
 
 #[test]

@@ -658,7 +658,7 @@ impl<'a> AndStep<'a> {
     /// leaving the **Node** in a state to proceed from there, or return **false** if the node cannot succeed
     ///
     /// It is important to keep in mind the difference between **XXXStep.back_off()** and **Path::back_off()**. For **Path**
-    /// **back_off()** only touches the path - that is, the Vec<XXXStep>. It can change Steps higher in the hierarchy
+    /// **back_off()** only touches the path - that is, the Vec(XXXStep). It can change Steps higher in the hierarchy
     /// or pop off the last step, but cannot change anything inside any of the *Step**s. **XXXStep::back_off()** ,
     /// on the other hand, should only change things within the current Step, that is 
     fn back_off(&mut self) -> bool {
@@ -669,6 +669,7 @@ impl<'a> AndStep<'a> {
         let limits = self.node.limits;
         let mut ret = true;
         if limits.lazy {
+            println!("TODO");
             // TODO
             ret = false;
         }

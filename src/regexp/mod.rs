@@ -1,9 +1,27 @@
 //! ## Regular expression search: RE parser
 //! This module offers all functionality for RE searches. It contains the code to parse the RE into a tree, and also exports
-//! the functionality to walk the tree and display the results.
-//! 
-//! The REs are parsed with the function *parse_tree()*, which returns a tree (actually an **AndNode**, which is the root of the tree)
-//! which can then be used in the walk phase to look for matches.
+//! the functionality to walk the tree and display the results. The walking is handled in the walk subpackage.
+///
+/// Besides traditional (elisp/perl) style regular expressions there is also a parser for a new style of regular expression,
+/// While writing the RE parser it became clear that by compiling the REs into a tree structure that would then be passed to
+/// a separate module to run the actual walk, it relied only on the intermediate structure, not the original REs. It also
+/// became clear that traditional REs might have been designed for ease of use, but the implementation requires a bunch of
+/// ad-hoc processing (for example, OR is an infix operation, AND serves both grouping units together and recording them
+/// for the final report) Longer ones also can be pretty opaque. The new RE parser included here was much simpler to write,
+/// because it has no special cases, and also has better functionality - all unit types (character strings, AND nodes, OR nodes)
+/// can be named and/or recorded. In addition, whitespace between units is ignored, so REs can be spaced and indented to be
+/// easier to understand. Finally, snippets can be named and recalled for future use multiple times. They can even be loaded
+/// from a library file, so a project using them can keep a library of "subroutines" to simplify complex expressions. 
+///
+/// Do I think these will replace traditional reguar expressions? No, but the purpose of this project was to learn more Rust,
+/// and writing this was a gooddesign exercise.
+///
+/// To run this from the commmand line just use *cargo run*. There is a help message to explain the usage in detail, but
+/// the simplest usage is just ** $ cargo run REGEXP STRING_TO_SEARCH**. There is also an interactive mode that allows
+/// saving and editing of regexps and text strings which can be invoked by ** $ cargo run -- -i**.
+///
+/// The simplest way to use it as a library (should anyone want to :-) is to use the function **parse_tree()** to get
+/// the tree, next use **walk_tree()** to get the results.
 // TODO:
 // - refactor: especially in WALK there seems to be a lot of repeat code. Using traits I think a lot can be consolidated
 pub mod walk;
@@ -41,8 +59,10 @@ const EFFECTIVELY_INFINITE: usize = 99999999;
 //
 //////////////////////////////////////////////////////////////////
 
-/// Node acts as a common wrapper for the different XNode struct types: CharsNode, SpecialCharNode, SetNode, AndNode, and OrNode.
-/// Besides serving as a common strcut to distribute message requests, it also behaves like Box in providing a place in memory for the structures to live.
+/// Node acts as a common wrapper for the different XXXNode struct
+/// types: CharsNode, SpecialCharNode, SetNode, AndNode, and OrNode.
+/// Besides serving like a Box to hold the different XXXNode structs it
+/// also functions to distribute messages to the proper XXXNode
 #[derive(PartialEq)]
 pub enum Node {Chars(CharsNode), And(AndNode), Or(OrNode), Range(RangeNode), Special(SpecialNode), Def(DefNode), None, }
 
@@ -74,7 +94,7 @@ impl Clone for Node {
     }
 }    
 impl Node {
-    /// function that simply distributes a walk request to the proper XNode struct
+    /// Distributes a walk request to the proper XXXNode struct
     fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, matched),
@@ -87,7 +107,7 @@ impl Node {
         }
     }
 
-    /// **desc()** is like Debug or Display, but for branches it pretty-prints both the node and its descendents
+    /// **desc()** similar to Debug or Display, but for AND and OR nodes also prints descendents with indenting by generation
     pub fn desc(&self, indent: usize) {
         match self {
             Node::Chars(a) => a.desc(indent),
@@ -99,19 +119,21 @@ impl Node {
             Node::None => print!("{0:1$}", "None", indent),
         }
     }
-        
-    fn set_named(&mut self, named: Option<String>) {
+
+    /// Sets the **self.named** value for the wrapped XXXNode
+    fn set_named(&mut self, named: Option<String>, name_outside: bool) {
         match self {
-            Node::Chars(a) => a.named = named,
-            Node::Special(a) => a.named = named,
-            Node::Range(a) => a.named = named,
-            Node::And(a) => a.named = named,
-            Node::Or(a) => a.named = named,
-            Node::Def(a) => a.node.set_named(named),
+            Node::Chars(a) => {a.named = named; a.name_outside = name_outside;},
+            Node::Special(a) => {a.named = named; a.name_outside = name_outside;},
+            Node::Range(a) => {a.named = named; a.name_outside = name_outside;},
+            Node::And(a) => {a.named = named; a.name_outside = name_outside;},
+            Node::Or(a) => {a.named = named; a.name_outside = name_outside;},
+            Node::Def(a) => {a.named = named; a.name_outside = name_outside;},
             Node::None => panic!("No name for None node"),
         };
     }
 
+    /// Gets the **self.named** value from the wrapped XXXNode
     fn named(&self) -> &Option<String> {
         match self {
             Node::Chars(a) => &a.named,
@@ -124,6 +146,7 @@ impl Node {
         }
     }
 
+    /// Sets the **self.limits** value for the wrapped XXXNode
     fn set_limits(&mut self, limits: Limits) {
         match self {
             Node::Chars(a) => a.limits = limits,
@@ -136,13 +159,12 @@ impl Node {
         };
     }
 
-    /// checks whether the node is the special Node::None type, used to initialize structures and in case of errors. In general
-    /// if the code finds this it means an error condition
+    /// checks whether the node is the special Node::None type, used to initialize structures and in case of errors. 
     fn is_none(&self) -> bool { *self == Node::None }
 
-    /// Called on Node creation, so if the race level is 2 or higher a message is output on node creation
-    /// **Important:** This function decreases the indent depth when called from AND or OR. It should be at the same trace level as
-    /// the *trace_enter()* call, which increases the indent when AND or OR are entered.
+    /// Used for tracing, expected to be called on Node creation so if the trace level is 2 or higher it is displayed.
+    /// **Important:** This function decreases the indent depth when called from AND or OR. It should be paired with 
+    /// the *trace_enter()* call (or something similar), to restore the indent level when the node parse is finished.
     fn trace(self) -> Self {
         if trace(2) {
             match &self {
@@ -156,8 +178,8 @@ impl Node {
     }
 }
 /// A debugging/trace function, called when a node starts parsing the RE. It should only be called after checking he trace level.
-/// **Important:** This function increases the indent depth when called from AND or OR. It should be at the same trace level as
-/// the *Node::trace()* call, which reduces the indent when AND or OR are exited.
+/// **Important:** This function increases the indent depth when called from AND or OR. It should be paired with 
+/// the *xxx_node.trace()* call (or something similar), to restore the indent level when the node parse is finished.
 fn trace_enter(name: &str, chars: &mut Peekable) {
     trace_indent();
     println!("{} starting from \"{}\"", name, chars.preview(6));
@@ -169,77 +191,141 @@ fn trace_enter(name: &str, chars: &mut Peekable) {
 //
 
 /// represents strings of regular characters that match themselves in the target string. This is a leaf node in the parse tree.
-/// Since character strings are implicit ANDs the limit only applies if there is a single char in the string.
+/// It holds a character string that must be matched exactly to match. 
 #[derive(Default, PartialEq,Clone)]
 pub struct CharsNode {
+    /// the repetition counts that are accepted in a match. In
+    /// traditional REs this is only relevant if **string** is of length 1,
+    /// but for the new REs it is fully utilized.
     limits: Limits,
+    /// If None then this is not recorded. If Some("") it is recorded
+    /// but unnamed, otherwise holds the name to reference the
+    /// match.
+    /// This is not needed for traditional REs but is a
+    /// necessary extension for the new parser
     named: Option<String>,
+    /// The string to match. It must match exactly.
     string: String,
+    /// Not used in traditional parser, in alternative one tells
+    /// whether it is whether each repetition is named, or the name
+    /// refers to all the repetitions
+    name_outside: bool,
 }
 
+/// Represents special character codes, such as \d for digits, . for anything, etc.
 #[derive(Default, PartialEq,Clone)]
 pub struct SpecialNode {
+    /// the repetition counts that are accepted in a match. 
     limits: Limits,
+    /// If None then this is not recorded. If Some("") it is recorded
+    /// but unnamed, otherwise holds the name to reference the match.
     named: Option<String>,
+    /// The character that is special. In case of an escape sequence
+    /// (ie \a) it holds only the 
     special: char,
+    /// Not used in traditional parser, in alternative one tells
+    /// whether it is whether each repetition is named, or the name
+    /// refers to all the repetitions
+    name_outside: bool,
 }
 
+/// Represents a character that is a member of, or is not a member of, a particular set.
 #[derive(Default,PartialEq,Clone)]
 pub struct RangeNode {
+    /// the repetition counts that are accepted in a match. 
     limits: Limits,
+    /// If None then this is not recorded. If Some("") it is recorded
+    /// but unnamed, otherwise holds the name to reference the match.
     named: Option<String>,
+    /// whether the character should match if it is in the set (false)
+    /// or not in the set (true)
     not: bool,
+    /// a string containing individual characters in the match
     chars: String,
+    /// An array of ranges that can contain the given character
     ranges: Vec<Range>,
+    /// Not used in traditional parser, in alternative one tells
+    /// whether it is whether each repetition is named, or the name
+    /// refers to all the repetitions
+    name_outside: bool,
 }
 
 
 /// handles AND (sequential) matches: this node represents a branch in the parse tree
 #[derive(Default, PartialEq)]
 pub struct AndNode {
+    /// the repetition counts that are accepted in a match. 
     limits: Limits,
-    /// NAMED == None means do not report, NAMED == "" means unnamed 
+    /// If None then this is not recorded. If Some("") it is recorded
+    /// but unnamed, otherwise holds the name to reference the match.
     named: Option<String>,
+    /// An array of child nodes that must all be satisfied for the AND to succeed
     nodes: Vec<Node>,
-    anchor: bool
+    /// (hack) used to handle acnhoring the match to the beginning
+    // TODO: change to special character
+    anchor: bool,
+    /// Not used in traditional parser, in alternative one tells
+    /// whether it is whether each repetition is named, or the name
+    /// refers to all the repetitions
+    name_outside: bool,
 }
 
 /// handles OR nodes (A\|B style matches). This node represents a branch in the parse tree
 #[derive(Default, PartialEq)]
 pub struct OrNode {
+    /// An array of child nodes one of which must be satisfied for the walk to succeed
     nodes: Vec<Node>,
-    /// Limits for OR nodes are different from other nodes. ORs cannot be repeated (except by enclosing them in
-    /// an AND), so Limits is used for OR to move through the different branches rather than the different repetitions
+    /// Because of the limitations of the OR node in traditional REs
+    /// there can be no repetition attached to it, o repeat it must be
+    /// wrapped in an AND. However, the alternative parser does allow
+    /// repetitions to be required, so the OrNode supports it.
     limits: Limits,
+    /// If None then this is not recorded. If Some("") it is recorded
+    /// but unnamed, otherwise holds the name to reference the match.
+    /// Not needed for traditional REs but a feature of the new stle
     named: Option<String>,
+    /// Not used in traditional parser, in alternative one tells
+    /// whether it is whether each repetition is named, or the name
+    /// refers to all the repetitions
+    name_outside: bool,
 }
 
 // TODO: This should contain a ref to the node in the defs table, but this requires major lifeline changes which I'm
 // not ready to do now, so in the short term it should have its own copy
+// TODO: lazy evaluation, so a DefNode can be in the tree before its definition has been loaded
+/// Provided solely for the alternative parser, this is a 
 #[derive(PartialEq)]
 pub struct DefNode {
+    /// Name of the snippet
     name: String,
+    /// Subtree giving the snippet
     node: Box<Node>,
+    limits: Limits,
+    named: Option<String>,
+    /// Not used in traditional parser, in alternative one tells
+    /// whether it is whether each repetition is named, or the name
+    /// refers to all the repetitions
+    name_outside: bool,
 }
 
 impl Default for DefNode {
-    fn default() -> DefNode  {DefNode { name: "".to_string(), node: Box::new(Node::None),  }  }
+    fn default() -> DefNode  {DefNode { name: "".to_string(), node: Box::new(Node::None), named: None, limits: Limits::default(), name_outside: false, }  }
 }
 
 impl Clone for AndNode {
     fn clone(&self) -> AndNode {
-        AndNode{limits: self.limits, named: self.named.clone(), anchor: self.anchor, nodes: self.nodes.to_vec()}
+        AndNode{limits: self.limits, named: self.named.clone(), anchor: self.anchor, nodes: self.nodes.to_vec(), name_outside: false, }
     }
 }
 
 impl Clone for OrNode {
     fn clone(&self) -> OrNode {
-        OrNode{limits: self.limits, named: self.named.clone(), nodes: self.nodes.to_vec()}
+        OrNode{limits: self.limits, named: self.named.clone(), nodes: self.nodes.to_vec(), name_outside: false, }
     }
 }
 impl Clone for DefNode {
     fn clone(&self) -> DefNode {
-        DefNode{node: self.node.clone(), name: self.name.clone()}
+        DefNode{node: self.node.clone(), name: self.name.clone(), named: self.named.clone(), limits: self.limits, name_outside: false, }
     }
 }
 
@@ -257,11 +343,17 @@ impl Debug for CharsNode {
             Some(name) => format!("<{}>", name,),
             None => "".to_string(),
         };
-        write!(f, "CharsNode{}: \"{}\"{}", name, self.string, self.limits.simple_display())
+        let limits_str = self.limits.simple_display();
+        let name_limits = if self.name_outside {(&limits_str, &name)} else {(&name, &limits_str)};
+        write!(f, "CharsNode{}: \"{}\"{}{}", name, self.string, name_limits.0, name_limits.1)
     }
 }
     
 impl CharsNode {
+    /// Traditional parser for Character units, strings of regular
+    /// characters that must match exactly. It is made a littl
+    /// trickier because characters do not "clump" when attached to
+    /// repetitions or OR nodes, so in some cases a **CharsNode** must be split.
     fn parse_node(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
         let mut node = CharsNode::default();
         let mut count = 0;
@@ -304,6 +396,8 @@ impl CharsNode {
     }
     
     fn desc(&self, indent: usize) { println!("{0:1$}{2:?}", "", indent, self); }
+
+    /// maps escape characters to the actual code they represent
     fn escaped_chars(ch: char) -> char {
         match ch {
             'n' => '\n',
@@ -325,13 +419,22 @@ impl Debug for SpecialNode {
             Some(name) => format!("<{}>", name,),
             None => "".to_string(),
         };
+        let limits_str = self.limits.simple_display();
+        let name_limits = if self.name_outside {(&limits_str, &name)} else {(&name, &limits_str)};
         let slash = if ".$".contains(self.special) { "" } else { "\\" };
-        write!(f, "SpecialNode{}: \"{}{}\"{}", name, slash, self.special, self.limits.simple_display())
+        write!(f, "SpecialNode{}: \"{}{}\"{}{}", name, slash, self.special, name_limits.0, name_limits.1)
     }
 }
     
 impl SpecialNode {
+    /// These are the defined escaped characters that are recognized as special codes
     const ESCAPE_CODES: &str = "adluox";
+    
+    /// Traditional parser for Special Character units, escape
+    /// sequences with special meaning ('\x' for hex) or characters
+    /// with special meaning, like '.' or '$'. This is also used in
+    /// the alternative parser since the definitions and handling are
+    /// identical.
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let mut node = SpecialNode::default();
         if trace(2) { trace_enter("SPECIAL", chars); }
@@ -345,6 +448,8 @@ impl SpecialNode {
         Ok(Node::Special(node))
     }
 
+    /// Checks whehter the given character at the front of the string
+    /// matches this node
     fn matches(&self, string: &str) -> Option<usize> {
         if let Some(ch) = string.chars().next() {
             if match self.special {
@@ -366,6 +471,9 @@ impl SpecialNode {
 }
 
 
+/// **Range** is used to represent a single range in a RangeNode
+/// set. The sets are of the form [abj-mxyz], where "j-m" represents
+/// any character between 'j' and 'm' inclusive.
 #[derive(Default,PartialEq,Clone)]
 pub struct Range { pub from: char, pub to: char}
 
@@ -384,11 +492,19 @@ impl Debug for RangeNode {
             Some(name) => format!("<{}>", name,),
             None => "".to_string(),
         };
-        write!(f, "RangeNode{}: \"{}\"{}", name, self, self.limits.simple_display())
+        let limits_str = self.limits.simple_display();
+        let name_limits = if self.name_outside {(&limits_str, &name)} else {(&name, &limits_str)};
+        write!(f, "RangeNode{}: \"{}\"{}{}", name, self, name_limits.0, name_limits.1)
     }
 }
     
 impl RangeNode {
+    /// Traditional parser for Range units, defined sets of characters
+    /// which the next character must be in or not be in, depending on
+    /// the mode. They are of the form [abci-mxyz], containing
+    /// individual characters and character ranges.
+    /// This is also used in the alternative parser since the
+    /// definitions and handling are identical.
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let mut node = RangeNode::default();
         if trace(2) { trace_enter("RANGE", chars); }
@@ -420,6 +536,9 @@ impl RangeNode {
         Ok(Node::Range(node))
     }
 
+    /// A reduced number of escaped characters are recognized in Range
+    /// definitions. Any escaped character not in the recognized set
+    /// is just mapped to itself, useful to include ']' among others.
     fn escapes(ch: char) -> char {
         match ch {
             't' => '\t',
@@ -428,23 +547,16 @@ impl RangeNode {
         }
     }
 
+    /// Checks whehter the given character at the front of the string
+    /// matches this node
     fn matches(&self, string: &str) -> Option<usize> {
         if let Some(ch) = string.chars().next() {
-            if self.not != self.chars.contains(ch) || self.ranges.iter().any(|x| x.contains(ch)) {
+            if self.not != (self.chars.contains(ch) || self.ranges.iter().any(|x| x.contains(ch))) {
                 Some(char_bytes(string, 1))
             } else { None }
         } else { None }
     }
 
-    fn xto_string(&self) -> String {
-        let mut string = "[".to_string();
-        if self.not { string.push('^')};
-        string.push_str(self.chars.as_str());
-        for x in self.ranges.iter() {
-            string.push_str(x.to_string().as_str());
-        }
-        string
-    }
     fn desc(&self, indent: usize) { println!("{0:1$}{2:?}", "", indent, self); }
 }
 
@@ -466,7 +578,9 @@ enum SetUnit {RegularChars(String), SpecialChar(char), Range(char, char), Empty}
 impl Debug for AndNode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
-        write!(f, "AndNode{}({}) {}", name, self.nodes.len(), self.limits.simple_display(), )
+        let limits_str = self.limits.simple_display();
+        let name_limits = if self.name_outside {(&limits_str, &name)} else {(&name, &limits_str)};
+        write!(f, "AndNode({}){}{}", self.nodes.len(), name_limits.0, name_limits.1)
     }
 }
     
@@ -488,7 +602,7 @@ impl AndNode {
         // pop off terminating chars
         let (_, _) = (chars.next(), chars.next());
         Ok(if nodes.is_empty() { Node::None }
-           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, named, anchor: false, })})
+           else { Node::And(AndNode {nodes, limits: Limits::parse(chars)?, named, anchor: false, name_outside: false})})
     }
 
     /// Parses out the name from a named And
@@ -535,12 +649,14 @@ impl AndNode {
 impl Debug for OrNode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
-        write!(f, "OrNode{}({}) {} ", name, self.nodes.len(), self.limits.simple_display(),  )
+        let limits_str = self.limits.simple_display();
+        let name_limits = if self.name_outside {(&limits_str, &name)} else {(&name, &limits_str)};
+        write!(f, "OrNode({}) {}{} ", self.nodes.len(), name_limits.0, name_limits.1)
     }
 }
 
 impl OrNode {
-    /// Recursively parses an AND node from the front of the Peekable stream
+    /// Recursively parses an OR node from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable, preceding_node: Node) -> Result<Node, Error> {
         if trace(2) { trace_enter("OR", chars); }
         let mut nodes = vec![preceding_node];
@@ -548,7 +664,7 @@ impl OrNode {
             Node::Or(mut or_node) => nodes.append(&mut or_node.nodes),
             next_node => nodes.push(next_node),
         };
-        Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None}))
+        Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None, name_outside: false}))
     }
     
     /// recovers an OrNode from the Node::Ar enum
@@ -578,6 +694,9 @@ impl OrNode {
 ///
 /// This prepares the string for processing by making a Peekable object to control the input string. It effectively
 /// wraps the whole RE in a \(...\) construct to make a single entry point to the tree.
+///
+/// The second argument, **alt_parser**, tells the engine whether to
+/// use the traditional parser or the alternative one.
 pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
     trace_set_indent(0);
     // wrap the string in "\(...\)" to make it an implicit AND node
@@ -597,14 +716,14 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
         and_node.anchor = true;
     }
     if !outer_and.is_none() {
-        outer_and.set_named(Some("".to_string()));
+        outer_and.set_named(Some("".to_string()), false);
         if chars.next().is_some() { return Err(Error::make(6, "Extra characters after parse completed (should not happen)")); }
     }
     Ok(outer_and)
 }
 
 /// main controller for the tree parse processing, it looks at the next few characters in the pipeline, decides what they are, and
-/// distributes them to the proper XNode constructor function
+/// distributes them to the proper XXXNode constructor function
 fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
     let node = match chars.peek_2() {
         (None, _) => Node::None,
@@ -624,8 +743,9 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
     } else { Ok(node.trace())}
 }
 
-/// This is the entrypoint to the phase 2, (tree walk) processing. It is put in this package to make it easier available, since loically it is
-/// part of the regexp search functionality.
+/// This is the entrypoint to the phase 2, (tree walk) processing. It
+/// is put in this package to make it easier available, since
+/// logically it is part of the regexp search functionality.
 pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path<'a>, usize)>, Error> {
     trace_set_indent(0);
     let mut start_pos = 0;
@@ -671,40 +791,43 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
 }
 
 //////////////////////////////////////////////////////////////////
-//
-// Alternate parser
-//
-// By breaking the search up into a parse phase and a walk phase it makes implementing
-// alternative parsers practical. The parser here is a simplified one allowing for
-// construction of more complex searches to be made more easily. The rules are as follows:
-//
-// - There are kinds of search units: CHAR blocks, RANGE blocks, AND blocks, and OR blocks.
-// - Outside of blocks whitespace is ignored. This means carriage returns and indenting
-//   can be used to help suggest the organization of a RE
-// - Unlike traditional REs, every unit can be saved, with or without a name. In addition,
-//   all blocks can have an associated rep coun.
-// - Units are indicated as follows:
-//   - CHAR unit: "TEXT..." (surrounded by quotation marks.
-//     - There are no special characters inside the quotation marks except '\'
-//     - Escaped characters include the standard ones for REs (\d for decimal, \a for ascii,
-//       etc. In addition, matching anything is "\." (not '.'), and a quote is "\""
-//   - RANGE unit: [ABC-M...] or [^ABC-N...]: like traditional REs, this is a list of
-//       characters and ranges that either contains or, if beginning with '^', doesn't
-//       contain a character
-//   - AND unit: and(U!U@U#...\) (starting with "and(" and ending with "\)") like retraditional
-//       REs, contains a list of 0 or more units that must all match sequentially
-//   - OR unit: or(U!U@U#...\): (starting with "or(" and ending with "\)") Like Retraditional
-//       REs, contains a list of 0 or more units where exactly one will match
-// - To save a unit in the results it can be either named or unnamed. Names are assigned
-//   by following the unit definition with "<NAME>". If NAME is left blank ("<>" it is
-//   unnamed but recorded. Anything without a name, aside from the entire match, will not
-//   be recorded in the search results
-// - Like REs, repetition counts are given by adding a suffix of *, ?, +, {X}, {X,}, or {X,Y}.
-//   Likewise, lazy evaluation is signalled by a trailing '?'.
-// - The order of the trailing attributes is important. A report including the unit U<name>*
-//   will have a report with N named entries matching U, while U*<name> will have a single
-// entry for U with the name "name" containing N matches for U.
-
+///
+/// Alternate parser
+///
+/// By breaking the search up into a parse phase and a walk phase it makes implementing
+/// alternative parsers practical. The parser here is a simplified one allowing for
+/// construction of more complex searches to be made more easily. The rules are as follows:
+///
+/// - There are kinds of search units: CHAR blocks, RANGE blocks, AND blocks, and OR blocks.
+/// - Outside of blocks whitespace is ignored. This means carriage returns and indenting
+///   can be used to help suggest the organization of a RE
+/// - Unlike traditional REs, every unit can be saved, with or without a name. In addition,
+///   all blocks can have an associated rep coun.
+/// - Units are indicated as follows:
+///   - **CHAR** unit: "TEXT..." (surrounded by quotation marks.)
+///     - There are no special characters inside the quotation marks except '\\'
+///     - Escaped characters include the standard ones for REs (\d for decimal, \a for ascii,
+///       etc. In addition, matching anything is "\." (not '.'), and a quote is "\""
+///     - Ranges (ie *[a-z0-9.]* and *[^a-z0-9.]*)
+///   - **AND** unit: and(U!U@U#...\) (starting with "and(" and ending with "\)") like retraditional
+///       REs, contains a list of 0 or more units that must all match sequentially
+///   - **OR** unit: or(U!U@U#...\): (starting with "or(" and ending with "\)") Like Retraditional
+///       REs, contains a list of 0 or more units where exactly one will match
+/// - To save a unit in the results it can be either named or unnamed. Names are assigned
+///   by following the unit definition with "&lt;NAME&gt;". If NAME is left blank ("<>") it is
+///   unnamed but recorded. Anything without a name, aside from the entire match, will not
+///   be recorded in the search results
+/// - Like REs, repetition counts are given by adding a suffix of *, ?, +, {X}, {X,}, or {X,Y}.
+///   Likewise, lazy evaluation is signalled by a trailing '?'.
+/// - The order of the trailing attributes is important. A report including the unit *U&lt;name&gt;*
+///   will have a report with N named entries matching U, while U*&lt;name&gt; will have a single
+///   entry for U with the name "name" containing N matches for U.
+/// - Commonly used sequences can be defined as snippets (or macros), and inserted into the tree.
+///   The snippets can have names and repeat counts attached, which can be accepted or overridden
+///   when they are called.
+///   - **def(NAME: RE0 RE1...)**: defines a subtree named NAME that can be substituted into the parse tree
+///   - **get(NAME)**: fetches a predefined subtree and inserts it into the tree at the current point
+///   - **use(FILE)**: reads definitions in from file
 /// main controller for the tree parse processing, it looks at the next few characters in the pipeline, decides what they are, and
 /// distributes them to the proper XNode constructor function
 fn alt_parse(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
@@ -723,20 +846,20 @@ fn alt_parse(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
         _ => return Err(Error::make(101, format!("Unexpected chars in regular expression: \"{}\" (should not happen)", chars.preview(6)).as_str()))
     };
     if !node.is_none() {
-        node.set_named(alt_parse_named(chars)?);
+        node.set_named(alt_parse_named(chars)?, false);
         let limits = Limits::parse(chars)?;
         if limits.min*limits.max != 1 {
             node.set_limits(limits);
         }
         if node.named().is_none() { 
-            node.set_named(alt_parse_named(chars)?);
+            node.set_named(alt_parse_named(chars)?, true);
         }
     }
     Ok(node.trace())
 }
 
 impl CharsNode {
-    const ALT_ESCAPE_CODES: &str = "adntluxo.$";
+    /// Entry point to parse a single Chars unit using the alternative parser
     fn alt_parse_node(chars: &mut Peekable, terminate: char) -> Result<Node, Error> {
         if trace(2) { trace_enter("CHARS", chars); }
         let mut chars_node = CharsNode::default();
@@ -763,7 +886,7 @@ impl CharsNode {
                             nodes.push(Node::Chars(chars_node));
                             chars_node = CharsNode::default();
                         }
-                        new_node = Node::Chars( CharsNode { string: String::from(ch), named: None, limits});
+                        new_node = Node::Chars( CharsNode { string: String::from(ch), named: None, limits, name_outside: false});
                     } else {
                         return Err(Error::make(103, "Repetition count with no node (should not happen)"));
                     }
@@ -785,7 +908,7 @@ impl CharsNode {
         Ok(match nodes.len() {
             0 => Node::None,
             1 => nodes.pop().unwrap(),
-            _ => Node::And(AndNode {limits: Limits::default(), named: None, nodes, anchor: false}),
+            _ => Node::And(AndNode {limits: Limits::default(), named: None, nodes, anchor: false, name_outside: false}),
         })
     }
 
@@ -794,9 +917,15 @@ impl CharsNode {
 // these defs aren't really needed since they just call the regular parser, but are here as a reminder
 // in case of future changes
 impl SpecialNode {
+    /// Entry point to parse a single special char using the alternative parser
+    /// (actually it is identical to the Special parser in the traditional parser, but has
+    /// a separate front end as a reminder, or to make future changes easier)
     fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> { SpecialNode::parse_node(chars) }
 }
 impl RangeNode {
+    /// Entry point to parse a single range set using the alternative parser
+    /// (actually it is identical to the Range parser in the traditional parser, but has
+    /// a separate front end as a reminder, or to make future changes easier)
     fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> { RangeNode::parse_node(chars) }
 }
 
@@ -822,12 +951,13 @@ impl AndNode {
             }
         }
         if nodes.is_empty() { Ok(Node::None) }
-        else { Ok(Node::And(AndNode {nodes, limits: Limits::default(), named: None, anchor: false, })) }
+        else { Ok(Node::And(AndNode {nodes, limits: Limits::default(), named: None, anchor: false, name_outside: false})) }
     }
 
 }
 
 impl OrNode {
+    /// Recursively parses an OR node from the front of the Peekable stream
     fn alt_parse_node(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
         if trace(2) { trace_enter("OR", chars); }
         let mut nodes = Vec::<Node>::new();
@@ -848,11 +978,11 @@ impl OrNode {
             }
         }
         if nodes.is_empty() { Ok(Node::None) }
-        else { Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None, })) }
+        else { Ok(Node::Or(OrNode {nodes, limits: Limits::default(), named: None, name_outside: false})) }
     }        
 }
 
-/// Parses out the name from a named And
+/// Parses out an optional unit name from the input stream
 fn alt_parse_named(chars: &mut Peekable) -> Result<Option<String>, Error> {
     if chars.peek() != Some('<') { return Ok(None); }
     chars.consume(1);
@@ -869,19 +999,24 @@ fn alt_parse_named(chars: &mut Peekable) -> Result<Option<String>, Error> {
 
 impl Debug for DefNode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "DefNode({})", self.name, )
+        let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
+        let limits_str = self.limits.simple_display();
+        let name_limits = if self.name_outside {(&limits_str, &name)} else {(&name, &limits_str)};
+        write!(f, "DefNode{}{}{} ", self.name, name_limits.0, name_limits.1  )
     }
 }
 
 impl DefNode {
+    /// Provides a snippet definition to splice into the parse tree
     fn alt_parse_node(chars: &mut Peekable, defs: &Defs) -> Result<Node, Error> { 
         if trace(2) { trace_enter("DEF", chars); }
         let name = Defs::name_from_stream(chars, false);
         if name.is_empty() { return Err(Error::make(106, "Missing required name for RE load")); }
+        if trace(4) { trace_indent(); println!("defining def {}", name); }
         if let Some(')') = chars.skip_whitespace().next() {}
         else { return Err(Error::make(107, "Bad char in definition name")); }
         if let Some(root) = defs.get(&name) {
-            Ok(Node::Def(DefNode{name, node: Box::new(root)}))
+            Ok(Node::Def(DefNode{name, node: Box::new(root), limits: Limits::default(), named: None, name_outside: false}))
         } else { Err(Error::make(108, "Could not find node matching name")) }
     }
     fn desc(&self, indent: usize) {
@@ -892,6 +1027,7 @@ impl DefNode {
     fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> { self.node.walk(matched) }
 }
 
+/// **Defs** holds snippet definitions as subtrees which can be inserted into the parse tree when called for
 #[derive(Default,Debug)]
 struct Defs {
     defs: HashMap<String, Node>,
@@ -900,6 +1036,7 @@ struct Defs {
 }
 
 impl Defs {
+    /// Parses a name and one or more Nodes from the input stream and stores it in the defs table
     fn parse(&mut self, chars: &mut Peekable) -> Result<Node, Error>{
         let name = Defs::name_from_stream(chars, false);
         if let Some(':') = chars.next() {}
@@ -918,20 +1055,31 @@ impl Defs {
             }
         }
         if nodes.is_empty() { return Err(Error::make(112, "No valid definition given")) }
-        let root = if nodes.len() == 1 {
+        let mut root = if nodes.len() == 1 {
             nodes.into_iter().next().unwrap()
         } else {
-            Node::And(AndNode{limits: Limits::default(), named: None, anchor: false, nodes})
+            Node::And(AndNode{limits: Limits::default(), named: None, anchor: false, nodes, name_outside: false})
         };
+        root.set_named(alt_parse_named(chars)?, false);
+        let limits = Limits::parse(chars)?;
+        if limits.min*limits.max != 1 {
+            root.set_limits(limits);
+        }
+        if root.named().is_none() { 
+            root.set_named(alt_parse_named(chars)?, true);
+        }
+        
         self.defs.insert(name, root);
         if trace(2) { trace_change_indent(-1); trace_indent(); println!("finished definition"); }
         Ok(Node::None)
     }
 
+    /// Fetches an already-defined function to be insered into the parse tree
     fn get(&self, name: &str) -> Option<Node> {
         self.defs.get(name).cloned()
     }
 
+    /// Reads RE snippet definitions from a file and loads them into the table
     fn load(&mut self, chars: &mut Peekable) -> Result<Node, Error> {
         let path = Defs::path_from_stream(chars);
         if let Some(')') = chars.skip_whitespace().next() {}
@@ -966,7 +1114,7 @@ impl Defs {
         Ok(Node::None)
         
     }
-        
+    /// gets a name from the input stream
     fn name_from_stream(chars: &mut Peekable, file: bool) -> String {
         let mut name_v = Vec::<char>::new();
         chars.skip_whitespace();
@@ -989,6 +1137,7 @@ impl Defs {
         name_v.iter().collect::<String>()
     }
     
+    /// gets a file name from the input stream
     fn path_from_stream(chars: &mut Peekable) -> String {
         let name = Defs::name_from_stream(chars, true);
         let name = if name.is_empty() {"~/.regexp".to_string()} else { name };
