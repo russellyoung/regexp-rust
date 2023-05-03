@@ -157,7 +157,7 @@ impl<'a> Path<'a> {
     fn back_off(&mut self) -> bool {
         if trace(6) { trace_change_indent(1); }
         let limits = self.limits();
-        let mut ret = true;
+        let mut ret = false;
         if limits.lazy {
             match self {
                 Path::Chars(steps) => {
@@ -243,6 +243,7 @@ impl<'a> Path<'a> {
                     let len0 = steps.len();
                     let mut last_step = steps.pop().unwrap();
                     if last_step.back_off() {
+                        ret = true;
                         steps.push(last_step);
                     } else {
                         ret = limits.check(steps.len()) == 0;
@@ -763,7 +764,7 @@ impl<'a> OrStep<'a> {
             trace_indent(); println!("back off Node: {:?}", self);
             trace_change_indent(1);
         }
-        let mut ret;
+        let ret;
         loop {
             if self.child_path.back_off() {
                 ret = "true: child backed off";

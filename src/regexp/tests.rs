@@ -390,15 +390,18 @@ fn e_check(alt: bool, re: &str, ecode: usize) {
     
 #[test]
 fn errors() {
-    e_check(false, r"abc\(de", 2);
-    e_check(false, r"abc[de", 4);
-    e_check(false, r"asd\)as", 5);
-    e_check(false, r"\(?<asd\)", 7);
-    e_check(false, r"\|sdf", 9);
-    e_check(false, r"asd{as", 10);
-    e_check(false, r"asd{4as", 12);
+    e_check(false, r"abc\(de", 1);
+    e_check(false, r"\(?<asd\)", 2);
+    // 3 should not happen
+    e_check(false, r"\|sdf", 4);
+    // 5 should not happen
+    e_check(false, r"asd\)as", 6);
+    e_check(false, r"asd{as", 7);
+    e_check(false, r"asd{4as", 7);
+    e_check(false, r"asd{4,x", 8);
+    e_check(false, r"abc[de", 9);
 }
-/*
+
 #[test]
 fn alt_chars() {
     find(true, r"abc", "xabcd", "abc");
@@ -426,6 +429,18 @@ fn alt_or() {
 
 #[test]
 fn alt_err() {
-    e_check(true, r"or(abc def)", 2);
+    e_check(true, "\"asd", 102);
+    e_check(true, r"and(abc def)", 104);
+    // the OR reads the trailing ')' for the wrapping AND node, which is why this is not 105
+    e_check(true, r"or(abc def)", 104);
+    e_check(true, r"or(abc or(def ", 105);
+    e_check(true, r"get() ", 106);
+    e_check(true, r"get(a() ", 107);
+    e_check(true, r"get(a) ", 108);
+    // there is no 109
+    e_check(true, r"and(asd )<xy ", 110);
+    e_check(true, r"def()", 111);
+    e_check(true, r"def(asd)", 112);
+    e_check(true, r"use(asd()", 113);
+    e_check(true, r"use(no-such-file)", 114);
 }
-*/
