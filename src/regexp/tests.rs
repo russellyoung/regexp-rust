@@ -173,7 +173,7 @@ fn find<'a>(alt: bool, re: &'a str, text: &'a str, expected: &'a str) {
     print!("RUNNING '{}' '{}'... ", re, text);
     std::io::stdout().flush().unwrap();
     let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let (path, _) = walk_tree(&tree, text)
+    let path = walk_tree(&tree, text)
         .unwrap_or_else(|err| panic!("Expected \"{}\", got error '{}'", expected, err))
         .unwrap_or_else(|| panic!("Expected {}, found none", expected));
     assert_eq!(path.matched_string(), expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, path.matched_string());
@@ -304,15 +304,18 @@ fn former_bugs() {
     find(false, r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
 }
 
-fn get_report<'a>(re: &'a str, text: &'a str, ) -> Report {
+fn report_test<'a>(re: &'a str, text: &'a str, func: fn(&Report)) {
     let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let (path, start) = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
-    crate::regexp::Report::new(&path, start, )
+    let path = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
+
+    let report = Report::new(&path);
+    func(&report);
 }       
+
 fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (usize, usize), child_count: usize) {
-    assert_eq!(report.found, expected);
-    assert_eq!(report.pos, pos);
-    assert_eq!(report.bytes, bytes);
+    assert_eq!(report.string(), expected);
+    assert_eq!(report.char_pos(), pos);
+    assert_eq!(report.byte_pos(), bytes);
     assert_eq!(report.subreports.len(), child_count);
 }
 
@@ -321,63 +324,75 @@ fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (us
 //
 // this could be more comprehensive, but regexp is not a real project
 //
+// When I changed Report to use a reference rather than make a new String this wouldn't compile
+// because PATH and TREE belonged to get_report() (the original name of report_test()). There was
+// no problem in the code, just in the tests. I played around with the organization and passing
+// args without success, so finally I figured out rather than passing the Report back to the
+// checks I could pass the checks to the Report.
 #[test]
 fn reports() {
     // basic
-    let report = get_report("asd", ".asd.");
-    check_report(&report, "asd", (1, 4), (1, 4), 0);
+    report_test("asd", ".asd.", |report: &Report| {
+        check_report(report, "asd", (1, 4), (1, 4), 0);
+    });
     // basic, unicode
-    let report = get_report("你好", ".你好.");
-    check_report(&report, "你好", (1, 3), (1, 7), 0);
+    report_test("你好", ".你好.", |report: &Report| {
+        check_report(report, "你好", (1, 3), (1, 7), 0); }
+    );
     // simple AND
-    let report = get_report(r"ab\(cd\)ef", ".abcdef.");
-    check_report(&report, "abcdef", (1, 7), (1, 7), 1);
-    check_report(&report.subreports[0], "cd", (3, 5), (3, 5), 0);
+    report_test(r"ab\(cd\)ef", ".abcdef.", |report: &Report| {
+        check_report(report, "abcdef", (1, 7), (1, 7), 1);
+        check_report(&report.subreports[0], "cd", (3, 5), (3, 5), 0);
+    });
     // simple AND unicode
-    let report = get_report(r"ab\(你\)好ef", ".ab你好ef.");
-    check_report(&report, "ab你好ef", (1, 7), (1, 11), 1);
-    check_report(&report.subreports[0], "你", (3, 4), (3, 6), 0);
-    assert!(report.get_by_name("fred").is_empty());
-    // nested and with repetition
-    let report = get_report(r"ab\(cd\(ef\)+\)+", ".abcdefefcd.");
-    check_report(&report, "abcdefef", (1, 9), (1, 9), 1);
-    check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
-    check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
-    check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
-    // silent AND
-    let report = get_report(r"ab\(?cd\)ef", ".abcdef.");
-    check_report(&report, "abcdef", (1, 7), (1, 7), 0);
-    // named
-    let report = get_report(r"ab\(?<first>cd\(?<second>ef\)+\)+", ".abcdefefcd.");
-    check_report(&report, "abcdefef", (1, 9), (1, 9), 1);
-    check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
-    check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
-    check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
-    assert!(report.get_by_name("fred").is_empty());
-    let first = report.get_by_name("first");
-    assert!(first.len() == 1);
-    check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
-    let second = report.get_by_name("second");
-    assert!(second.len() == 2);
-    check_report(second[0], "ef", (5, 7), (5, 7), 0);
-    check_report(second[1], "ef", (7, 9), (7, 9), 0);
-    let zeroth = report.get_by_name("");
-    check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
-    assert!(report.get_by_name("fake").is_empty());
-    // all names
-    let all = report.get_named();
-    let zeroth = all.get("").unwrap();
-    check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
-    let first = all.get("first").unwrap();
-    assert!(first.len() == 1);
-    check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
-    let second = all.get("second").unwrap();
-    assert!(second.len() == 2);
-    check_report(second[0], "ef", (5, 7), (5, 7), 0);
-    check_report(second[1], "ef", (7, 9), (7, 9), 0);
-    assert!(all.get("fake").is_none());
-}
+    report_test(r"ab\(你\)好ef", ".ab你好ef.", |report: &Report| {
+        check_report(report, "ab你好ef", (1, 7), (1, 11), 1);
+        check_report(&report.subreports[0], "你", (3, 4), (3, 6), 0);
+        assert!(report.get_by_name("fred").is_empty());
+    });
 
+    // nested and with repetition
+    report_test(r"ab\(cd\(ef\)+\)+", ".abcdefefcd.", |report: &Report| {
+        check_report(report, "abcdefef", (1, 9), (1, 9), 1);
+        check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
+        check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
+        check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
+    });
+    // silent AND
+    report_test(r"ab\(?cd\)ef", ".abcdef.", |report: &Report| {
+        check_report(report, "abcdef", (1, 7), (1, 7), 0);
+    });
+    // named
+    report_test(r"ab\(?<first>cd\(?<second>ef\)+\)+", ".abcdefefcd.", |report| {
+        check_report(report, "abcdefef", (1, 9), (1, 9), 1);
+        check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
+        check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
+        check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
+        assert!(report.get_by_name("fred").is_empty());
+        let first = report.get_by_name("first");
+        assert!(first.len() == 1);
+        check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
+        let second = report.get_by_name("second");
+        assert!(second.len() == 2);
+        check_report(second[0], "ef", (5, 7), (5, 7), 0);
+        check_report(second[1], "ef", (7, 9), (7, 9), 0);
+        let zeroth = report.get_by_name("");
+        check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
+        assert!(report.get_by_name("fake").is_empty());
+        // all names
+        let all = report.get_named();
+        let zeroth = all.get("").unwrap();
+        check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
+        let first = all.get("first").unwrap();
+        assert!(first.len() == 1);
+        check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
+        let second = all.get("second").unwrap();
+        assert!(second.len() == 2);
+        check_report(second[0], "ef", (5, 7), (5, 7), 0);
+        check_report(second[1], "ef", (7, 9), (7, 9), 0);
+        assert!(all.get("fake").is_none());
+    });
+}
 //
 // error tests
 //

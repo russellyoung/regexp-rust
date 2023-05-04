@@ -204,14 +204,14 @@ pub fn main() {
             //println!("{:?}", config);
             if !config.text.is_empty() {
                 match regexp::walk_tree(&tree, &config.text) {
-                    Ok(Some((path, char_start))) => {
+                    Ok(Some(path)) => {
                         if config.walk {
                             println!("--- Walk:");
                             path.dump(0);
                             println!("--- End walk");
                         }
-                        println!("{:?}", path); Report::new(&path, char_start).display(0);
-                }
+                        println!("{:?}", path); Report::new(&path).display(0);
+                    }
                     Ok(None) => println!("No match"),
                     Err(error) => println!("{}", error)
                 }

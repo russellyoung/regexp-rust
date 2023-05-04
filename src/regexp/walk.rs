@@ -17,23 +17,7 @@ use crate::{trace, trace_indent, trace_change_indent};
 // trtee and to build the Report structure for the caller.
 //
 //////////////////////////////////////////////////////////////////
-#[derive(Copy)]
-pub struct Matched<'a> {
-    /// the String where this match starts
-    pub full_string: &'a str,
-    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
-    pub start: usize,
-    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
-    pub end: usize,
-    /// the start of the string in characters
-    pub char_start: usize,
-}
 
-impl<'a> Debug for Matched<'a> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "match \"{}\" [{}-{}) from {}", self.string(), self.start, self.end, self.abbrev())
-    }
-}
 /// Represents a single step for a CharsNode (a string of regular characters)
 pub struct CharsStep<'a> {
     /// The node from phase 1
@@ -259,8 +243,7 @@ impl<'a> Path<'a> {
 
     /// recursively creates **Report** objects for a path. For the branches (And and Or) this means recording itself
     /// and then collecting from the children recursively. leaves just need to record themselves
-    pub fn gather_reports(&'a self, char_start: usize) -> (Vec<Report>, usize) {
-        let mut char_pos = char_start;
+    pub fn gather_reports(&'a self) -> Vec<Report> {
         let mut reports = Vec::<Report>::new();
         match self {
             Path::And(steps) => {
@@ -268,8 +251,7 @@ impl<'a> Path<'a> {
                 // There is an entry for 0 in the list, if there are others pop them off
                 if steps.len() > 1 { let _ = iter.next(); }
                 for step in iter {
-                    let (mut subreport, pos) = step.make_report(char_pos);
-                    char_pos = pos;
+                    let mut subreport = step.make_report();
                     if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
                     else { reports.push(subreport); }
                 }
@@ -279,8 +261,7 @@ impl<'a> Path<'a> {
                 // There is an entry for 0 in the list, if there are others pop them off
                 if steps.len() > 1 { let _ = iter.next(); }
                 for step in iter {
-                    let (mut subreport, pos) = step.make_report(char_pos);
-                    char_pos = pos;
+                    let mut subreport = step.make_report();
                     if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
                     else { reports.push(subreport); }
                 }
@@ -290,8 +271,7 @@ impl<'a> Path<'a> {
                 // There is an entry for 0 in the list, if there are others pop them off
                 if steps.len() > 1 { let _ = iter.next(); }
                 for step in iter {
-                    let (subreport, pos) = step.make_report(char_pos);
-                    char_pos = pos;
+                    let subreport = step.make_report();
                     if subreport.name.is_some() { reports.push(subreport); }
                 }
             },
@@ -300,8 +280,7 @@ impl<'a> Path<'a> {
                 // There is an entry for 0 in the list, if there are others pop them off
                 if steps.len() > 1 { let _ = iter.next(); }
                 for step in iter {
-                    let (subreport, pos) = step.make_report(char_pos);
-                    char_pos = pos;
+                    let subreport = step.make_report();
                     if subreport.name.is_some() { reports.push(subreport); }
                 }
             },
@@ -310,14 +289,13 @@ impl<'a> Path<'a> {
                 // There is an entry for 0 in the list, if there are others pop them off
                 if steps.len() > 1 { let _ = iter.next(); }
                 for step in iter {
-                    let (subreport, pos) = step.make_report(char_pos);
-                    char_pos = pos;
+                    let subreport = step.make_report();
                     if subreport.name.is_some() { reports.push(subreport); }
                 }
             },
             Path::None => panic!("Should not be any None path when compiling report"),
         }
-        (reports, char_pos)
+        reports
     }
 
     pub fn dump(&self, mut indent: usize) {
@@ -504,15 +482,10 @@ impl<'a> CharsStep<'a> {
     }
 
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self, char_start: usize) -> (Report, usize) {
-        let matched_string = &self.matched.string();
-        let char_len = self.matched.len_chars();
-        (Report {found: matched_string.to_string(),
+    fn make_report(&self) -> Report {
+        Report {matched: self.matched,
                  name: self.node.named.clone(),
-                 pos: (char_start, char_start + char_len),
-                 bytes: (self.matched.start, self.matched.end),
-                 subreports: Vec::<Report>::new()},
-                 char_start + char_len)
+                 subreports: Vec::<Report>::new()}
     }
 
     fn dump(&self, rank: usize, indent: usize) {
@@ -549,15 +522,10 @@ impl<'a> SpecialStep<'a> {
     }
 
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self, char_start: usize) -> (Report, usize) {
-        let matched_string = &self.matched.string();
-        let char_len = self.matched.len_chars();
-        (Report {found: matched_string.to_string(),
-                 name: self.node.named.clone(),
-                 pos: (char_start, char_start + char_len),
-                 bytes: (self.matched.start, self.matched.end),
-                 subreports: Vec::<Report>::new()},
-                 char_start + char_len)
+    fn make_report(&self) -> Report {
+        Report {matched: self.matched,
+                name: self.node.named.clone(),
+                subreports: Vec::<Report>::new()}
     }
 
     fn dump(&self, rank: usize, indent: usize) {
@@ -594,15 +562,10 @@ impl<'a> RangeStep<'a> {
     }
 
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self, char_start: usize) -> (Report, usize) {
-        let matched_string = &self.matched.string();
-        let char_len = self.matched.len_chars();
-        (Report {found: matched_string.to_string(),
-                 name: self.node.named.clone(),
-                 pos: (char_start, char_start + char_len),
-                 bytes: (self.matched.start, self.matched.end),
-                 subreports: Vec::<Report>::new()},
-                 char_start + char_len)
+    fn make_report(&self) -> Report {
+        Report {matched: self.matched,
+                name: self.node.named.clone(),
+                subreports: Vec::<Report>::new()}
     }
 
     fn dump(&self, rank: usize, indent: usize) {
@@ -700,20 +663,15 @@ impl<'a> AndStep<'a> {
     }
     
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self, char_start: usize) -> (Report, usize) {
+    fn make_report(&self) -> Report {
         let mut reports = Vec::<Report>::new();
-        let mut char_end = char_start;
         for p in &self.child_paths {
-            let (mut subreports, loc) = p.gather_reports(char_end);
-            char_end = loc;
+            let mut subreports = p.gather_reports();
             reports.append(&mut subreports);
         }
-        (Report {found: self.matched.string().to_string(),
+        Report { matched: self.matched,
                  name: self.node.named.clone(),
-                 pos: (char_start, char_end),
-                 bytes: (self.matched.start, self.matched.end),
-                 subreports: reports},
-         char_end)
+                 subreports: reports}
     }
 
     pub fn dump(&self, rank: usize, indent: usize) {
@@ -792,14 +750,11 @@ impl<'a> OrStep<'a> {
     }
     
     /// Compiles a **Report** object from this path and its child after a successful search
-    fn make_report(&self, char_start: usize) -> (Report, usize) {
-        let (subreports, char_end) = self.child_path.gather_reports(char_start);
-        (Report {found: self.matched.string().to_string(),
+    fn make_report(&self) -> Report {
+        let subreports = self.child_path.gather_reports();
+        Report { matched: self.matched,
                  name: self.node.named.clone(),
-                 pos: (char_start, char_end),
-                 bytes: (self.matched.start, self.matched.end),
-                 subreports},
-         char_end)
+                 subreports}
     }
 
     pub fn dump(&self, rank: usize, indent: usize) {
@@ -808,17 +763,37 @@ impl<'a> OrStep<'a> {
     }
 }
 
+/// **Matched** is used to keep track of the state of the search
+/// string. It holds the whole string as well as offset to the
+/// beginning and end of the substring matched by its owning **Step**.
+#[derive(Copy)]
+pub struct Matched<'a> {
+    /// the String where this match starts
+    pub full_string: &'a str,
+    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
+    pub start: usize,
+    /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
+    pub end: usize,
+    /// the start of the string in characters
+    pub char_start: usize,
+}
+
+impl<'a> Debug for Matched<'a> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "match \"{}\" [{}-{}) from {}", self.string(), self.start, self.end, self.abbrev())
+    }
+}
 impl<'a> Clone for Matched<'a> {
     fn clone(&self) -> Self { Matched {full_string: self.full_string, start: self.start, end: self.end, char_start: self.char_start} }
 }
 
 impl<'a> Matched<'a> {
     /// Returns the length of the match in bytes
-    fn len(&self) -> usize { self.end - self.start }
+    pub fn len(&self) -> usize { self.end - self.start }
     /// Returns the length of the match in chars
-    fn len_chars(&self) -> usize { self.string().chars().count() }
+    pub fn len_chars(&self) -> usize { self.string().chars().count() }
     /// Returns pointer to the matching str slice
-    fn string(&self) -> &str { &self.full_string[self.start..self.end] }
+    pub fn string(&self) -> &str { &self.full_string[self.start..self.end] }
     /// returns the remainder of the str starting from the match beginning
     fn unterminated(&self) -> &str { &self.full_string[self.start..] }
     /// returns the remainder of the str starting from the match end

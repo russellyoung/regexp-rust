@@ -27,9 +27,11 @@ pub(crate) struct Interactive {
     res: Vec<String>,
     /// the list of target strings, last one is the current value
     texts: Vec<String>,
-//    tree: Node,
-    /// the tree used to parse the user commands, parsed from CMD_PARSE_RE, to save it from having to be reparsed every time
-    cmd_parse_tree: Node,
+    // Interesting: I stored cmd_parse_tree here to avoid having to recompute it each time, and found
+    // it caused a borrow violation. Moving it out and passing it as an extra parameter to where it is used
+    // removed the problem. Lesson learned.
+    // the tree used to parse the user commands, parsed from CMD_PARSE_RE, to save it from having to be reparsed every time
+    //    cmd_parse_tree: Node,
     /// the prompt string to use: can be reset (originally it was to reflect the state, now it is constant and this can be removed)
     prompt_str: String,
 }
@@ -80,7 +82,7 @@ The commands are:
 
 /// gets the matching string for a single named variable from the search results. This is used to parse the used input
 fn get_var<'a>(vars: &HashMap<&'a str, Vec<&'a Report>>, name: &'a str) -> &'a str {
-    if let Some(var) = vars.get(name) { var[0].found.as_str() } else { "" }
+    if let Some(var) = vars.get(name) { var[0].string() } else { "" }
 }
 
 /// parse the command from the possily abbreviated version passed in
@@ -105,7 +107,6 @@ impl Interactive {
         Interactive { res,
                       texts,
 //                      tree: Node::None,
-                      cmd_parse_tree: parse_tree(CMD_PARSE_RE, false).unwrap(),
                       prompt_str: PROMPT.to_string(),
         }
     }
@@ -119,6 +120,7 @@ impl Interactive {
     pub(crate) fn run(&mut self) {
         let stdin = io::stdin();
         let mut buffer;
+        let cmd_re = parse_tree(CMD_PARSE_RE, false).unwrap();
         loop {
             buffer = "".to_string();
             self.prompt();
@@ -127,7 +129,7 @@ impl Interactive {
                 Ok(1) => (),
                 Ok(_x) => {
                     let  _ = buffer.pop();    // pop off trailing CR
-                    if !self.find_command(&buffer) {break; }
+                    if !self.find_command(&buffer, &cmd_re) {break; }
                 },
                 Err(_msg) => { break;},
             }
@@ -152,18 +154,25 @@ impl Interactive {
     }
 
     /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
-    fn find_command(&mut self, input: &str) -> bool{
-        let walk = walk_tree(&self.cmd_parse_tree, input);
+    fn find_command(&mut self, input: &str, cmd_re: &Node) -> bool{
+        let walk = walk_tree(cmd_re, input);
         println!("{:#?}", walk);
-        if let Ok(Some((path, _))) = &walk {
-            let report = Report::new(path, 0);
+        if let Ok(Some(path)) = &walk {
+            let report = Report::new(path);
             let vars = report.get_named();
-            self.execute_command(get_var(&vars, "cmd"),      // first word
-                                 get_var(&vars, "subcmd"),   // second word if it is alphabetic
-                                 get_var(&vars, "num"),      // second word if it is numeric
-                                 get_var(&vars, "tail"),     // stuff after second word
-                                 get_var(&vars, "body"),     // everything after the first word
-                                 get_var(&vars, "all"),)     // everything, trimmed
+            let all = get_var(&vars, "all");
+            let body = get_var(&vars, "body");
+            let tail = get_var(&vars, "tail");
+            let num = get_var(&vars, "num");      // second word if it is numeric
+            let subcmd = get_var(&vars, "subcmd");   // second word if it is alphabetic
+            let cmd = get_var(&vars, "cmd");      // first word
+            self.execute_command(cmd, 
+                                 subcmd,
+                                 num,
+                                 tail,
+                                 body,
+                                 all
+                                 ,)     // everything, trimmed
         } else {
             self.execute_command("", "", "", "", "", input)
         }
@@ -262,15 +271,15 @@ impl Interactive {
         match parse_tree(re, false) {
             Ok(node) => {
                 match walk_tree(&node, text) {
-                    Ok(Some((path, char_start,))) => {
-                        let report = Report::new(&path, char_start);
+                    Ok(Some(path)) => {
+                        let report = Report::new(&path);
                         if subcmd.is_empty() { report.display(0) }
                         else {
                             let matches = report.get_by_name(subcmd);
                             if matches.is_empty() { println!("No named matches for \"{}\"", subcmd); }
                             else {
                                 for (i, matched) in matches.iter().enumerate() {
-                                    println!("  {}) \"{}\", position {}", i, matched.found, matched.pos.0); }
+                                    println!("  {}) \"{}\", position {}", i, matched.string(), matched.byte_pos().0); }
                                 //for i in 0..matches.len() { println!("  {}) \"{}\", position {}", i, matches[i].found, matches[i].pos.0); }
                             }
                         }
@@ -290,7 +299,7 @@ impl Interactive {
             Ok(node) => {
                 set_trace(trace);
                 match walk_tree(&node, text) {
-                    Ok(Some((path, char_start, ))) => println!("{:?}", Report::new(&path, char_start).display(0)),
+                    Ok(Some(path)) => println!("{:?}", Report::new(&path).display(0)),
                     Ok(None) => println!("No match"),
                     Err(error) => println!("Error in search: {}", error)
                 }
