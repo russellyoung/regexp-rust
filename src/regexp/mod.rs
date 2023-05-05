@@ -122,13 +122,14 @@ impl Node {
 
     /// Sets the **self.named** value for the wrapped XXXNode
     fn set_named(&mut self, named: Option<String>, name_outside: bool) {
+        let outside = name_outside && named.is_some();
         match self {
-            Node::Chars(a) => {a.named = named; a.name_outside = name_outside;},
-            Node::Special(a) => {a.named = named; a.name_outside = name_outside;},
-            Node::Range(a) => {a.named = named; a.name_outside = name_outside;},
-            Node::And(a) => {a.named = named; a.name_outside = name_outside;},
-            Node::Or(a) => {a.named = named; a.name_outside = name_outside;},
-            Node::Def(a) => {a.named = named; a.name_outside = name_outside;},
+            Node::Chars(a) => {a.named = named; a.name_outside = outside;},
+            Node::Special(a) => {a.named = named; a.name_outside = outside;},
+            Node::Range(a) => {a.named = named; a.name_outside = outside;},
+            Node::And(a) => {a.named = named; a.name_outside = outside;},
+            Node::Or(a) => {a.named = named; a.name_outside = outside;},
+            Node::Def(a) => {a.named = named; a.name_outside = outside;},
             Node::None => panic!("No name for None node"),
         };
     }
@@ -746,9 +747,10 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
 /// This is the entrypoint to the phase 2, (tree walk) processing. It
 /// is put in this package to make it easier available, since
 /// logically it is part of the regexp search functionality.
-pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path<'a>, usize)>, Error> {
+pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<walk::Path<'a>>, Error> {
     trace_set_indent(0);
     let mut start_pos = 0;
+    let mut char_start = 0;
     // hey, optimization
     // deosn't save that much time but makes the trace debug easier to read
     let root = {if let Node::And(r) = tree { r } else { return Err(Error::make(5, "Root of tree should be Node::And (should not happen)")); }};
@@ -761,6 +763,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
                         if offset > 0 {
                             if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", chars_node.string, offset); }
                             start_pos = offset;
+                            char_start = text[0..offset].chars().count();
                         }
                     },
                     None => { return Ok(None); }
@@ -769,14 +772,13 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<(walk::Path
         }
     }
 
-    let mut char_start = 0;
     loop {
         if trace(1) {println!("\n==== WALK \"{}\" ====", &text[start_pos..])}
         let matched = Matched { full_string: text, start: start_pos, end: start_pos, char_start };
         let path = tree.walk(matched);
         if path.len() > 1 {
             if trace(1) { println!("--- Search succeeded ---") };
-            return Ok(Some((path, char_bytes(text, start_pos))));
+            return Ok(Some(path));
         }
         if trace(1) {println!("==== WALK \"{}\": no match ====", &text[start_pos..])};
         if root.anchor { break; }
@@ -851,7 +853,7 @@ fn alt_parse(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
         if limits.min*limits.max != 1 {
             node.set_limits(limits);
         }
-        if node.named().is_none() { 
+        if node.named().is_none() {
             node.set_named(alt_parse_named(chars)?, true);
         }
     }
@@ -1294,33 +1296,41 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
 //////////////////////////////////////////////////////////////////
 
 #[derive(Debug,Clone)]
-pub struct Report {
-    /// The string found matching the RE pattern
-    pub found: String,
-    /// The position in chars of the string. This cannot be used for slices, except for ASCII chars. To get a slice use **pos**
-    pub pos: (usize, usize),
-    /// The position in bytes of the string: that is, found[pos.0..pos.1] is a valid unicode substring containing the match
-    pub bytes: (usize, usize),
+pub struct Report<'a> {
+    matched: Matched<'a>,
     /// The name of the field: if None then the field should not be included in the Report tree, if Some("") it is included but
     /// unnamed, otherwise it is recorded with the given name
     pub name: Option<String>,
     /// Array of child Report structs, only non-empty for And and Or nodes. OrNodes will have only a single child node, AndNodes can have many.
-    pub subreports: Vec<Report>,
+    pub subreports: Vec<Report<'a>>,
 }
 
-impl Report {
+impl<'a> Report<'a> {
     /// Constructor: creates a new report from a successful Path
-    pub fn new(root: &crate::regexp::walk::Path, char_start: usize) -> Report {
-        let (reports, _char_end)  = root.gather_reports(char_start);
-        reports[0].clone()
+    pub fn new(root: &'a crate::regexp::walk::Path) -> Report<'a> {
+        let mut reports = root.gather_reports();
+        let mut ret = reports.splice(0.., None);
+        ret.next().unwrap()
     }
-    
+
+    // API accessor functions
+    /// Gets the string matched by this unit
+    pub fn string(&self) -> &str { self.matched.string() }
+    /// Gets the start and end position of the match in bytes
+    pub fn byte_pos(&self) -> (usize, usize) { (self.matched.start, self.matched.end) }
+    /// Gets the start and end position of the match in chars
+    pub fn char_pos(&self) -> (usize, usize) { (self.matched.char_start, self.matched.char_start + self.matched.len_chars()) }
+    /// Gets the length of the match in bytes
+    pub fn len_bytes(&self) -> usize { self.matched.len_bytes() }
+    /// Gets the length of the match in chars
+    pub fn len_chars(&self) -> usize { self.matched.len_chars() }
+
     /// Pretty-prints a report with indentation to help make it easier to read
     pub fn display(&self, indent: usize) {
-        let name_str = { if let Some(name) = &self.name { format!("<{}>", name) } else { "".to_string() }};
+        let name_str = { if let Some(name) = &self.name { format!("<{}> ", name) } else { "".to_string() }};
         print!("{0:1$}", "", indent);
-        println!("\"{}\" char position [{}, {}] byte position [{}, {}] {}",
-                 self.found, self.pos.0, self.pos.1, self.bytes.0, self.bytes.1, name_str);
+        println!("\"{}\" {}chars start {}, length {}; bytes start {}, length {}",
+                 self.matched.string(), name_str, self.matched.char_start, self.matched.len_chars(), self.matched.start, self.matched.end - self.matched.start);
         self.subreports.iter().for_each(move |r| r.display(indent + TAB_SIZE));
     }
 
@@ -1345,7 +1355,7 @@ impl Report {
     }
 
     /// internal function that does the work for **get_named()**
-    fn get_named_internal<'b>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report>>) -> HashMap<&'b str, Vec<&Report>> {
+    fn get_named_internal<'b: 'a>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report<'a>>>) -> HashMap<&'b str, Vec<&Report>> {
         if let Some(name) = &self.name {
             if let Some(mut_v) = hash.get_mut(&name.as_str()) {
                 mut_v.push(self);

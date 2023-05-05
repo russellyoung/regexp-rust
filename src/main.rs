@@ -67,7 +67,7 @@ mod interactive;
 use crate::regexp::Report;
 use crate::interactive::Interactive;
 
-use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering::{Acquire, Release, AcqRel}};
+use core::sync::atomic::{AtomicIsize, AtomicUsize, AtomicU32, Ordering::{Acquire, Release, AcqRel}};
 
 use clap::{Parser, value_parser};               // Command Line Argument Processing
 
@@ -116,6 +116,15 @@ pub(crate) fn trace_get_indent() -> usize {
 /// ** trace_indent()** gets the number of spaces to use as prefix to trace output
 pub(crate) fn trace_indent() {
     print!("{0:1$}", "", trace_get_indent());
+}
+
+/// the number of indents to print before nested trace lines
+static ABBREV_LEN: AtomicU32 = AtomicU32::new(5);
+fn set_abbrev(len: u32) {
+    ABBREV_LEN.store(len, Release)
+}
+pub(crate) fn get_abbrev() -> usize {
+    usize::try_from(ABBREV_LEN.load(Acquire)).unwrap_or_default()
 }
 
 // (regular Expressions Rust): sample Rust program to search strings using regular expressions
@@ -189,7 +198,7 @@ pub fn main() {
             return;
         }
     };
-    crate::regexp::walk::set_abbrev_size(config.abbrev);
+    set_abbrev(config.abbrev);
     
     if config.interactive { return Interactive::new(config).run(); }
     set_trace(config.debug as usize);

@@ -247,52 +247,73 @@ impl<'a> Path<'a> {
         let mut reports = Vec::<Report>::new();
         match self {
             Path::And(steps) => {
-                let mut iter = steps.iter();
-                // There is an entry for 0 in the list, if there are others pop them off
-                if steps.len() > 1 { let _ = iter.next(); }
-                for step in iter {
+                // The first step represents 0 matches, it should be skipped if there are any others
+                for step in steps.iter().skip(if steps.len() > 1 {1} else {0}) {
                     let mut subreport = step.make_report();
                     if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
                     else { reports.push(subreport); }
                 }
+                if steps[0].node.name_outside {
+                    let mut matched = steps[0].matched;
+                    matched.end = steps.last().unwrap().matched.end;
+                    let mut subreports = Vec::new();
+                    reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
+                    reports = vec![Report { matched, name: steps[0].node.named.clone(), subreports }];
+                };
             },
             Path::Or(steps) => {
-                let mut iter = steps.iter();
-                // There is an entry for 0 in the list, if there are others pop them off
-                if steps.len() > 1 { let _ = iter.next(); }
-                for step in iter {
+                for step in steps.iter().skip(if steps.len() > 1 {1} else {0}) {
                     let mut subreport = step.make_report();
                     if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
                     else { reports.push(subreport); }
                 }
+                if steps[0].node.name_outside {
+                    let mut matched = steps[0].matched;
+                    matched.end = steps.last().unwrap().matched.end;
+                    let mut subreports = Vec::new();
+                    reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
+                    reports = vec![Report { matched, name: steps[0].node.named.clone(), subreports }];
+                };
             },
             Path::Chars(steps) => {
-                let mut iter = steps.iter();
-                // There is an entry for 0 in the list, if there are others pop them off
-                if steps.len() > 1 { let _ = iter.next(); }
-                for step in iter {
+                for step in steps.iter().skip(if steps.len() > 1 {1} else {0}) {
                     let subreport = step.make_report();
                     if subreport.name.is_some() { reports.push(subreport); }
                 }
+                if steps[0].node.name_outside {
+                    let mut matched = steps[0].matched;
+                    matched.end = steps.last().unwrap().matched.end;
+                    let mut subreports = Vec::new();
+                    reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
+                    reports = vec![Report { matched, name: steps[0].node.named.clone(), subreports }];
+                };
             },
             Path::Special(steps) => {
-                let mut iter = steps.iter();
-                // There is an entry for 0 in the list, if there are others pop them off
-                if steps.len() > 1 { let _ = iter.next(); }
-                for step in iter {
+                for step in steps.iter().skip(if steps.len() > 1 {1} else {0}) {
                     let subreport = step.make_report();
                     if subreport.name.is_some() { reports.push(subreport); }
                 }
+                if steps[0].node.name_outside {
+                    let mut matched = steps[0].matched;
+                    matched.end = steps.last().unwrap().matched.end;
+                    let mut subreports = Vec::new();
+                    reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
+                    reports = vec![Report { matched, name: steps[0].node.named.clone(), subreports }];
+                };
             },
             Path::Range(steps) => {
-                let mut iter = steps.iter();
-                // There is an entry for 0 in the list, if there are others pop them off
-                if steps.len() > 1 { let _ = iter.next(); }
-                for step in iter {
+                for step in steps.iter().skip(if steps.len() > 1 {1} else {0}) {
                     let subreport = step.make_report();
                     if subreport.name.is_some() { reports.push(subreport); }
                 }
-            },
+                if steps[0].node.name_outside {
+                    let mut matched = steps[0].matched;
+                    matched.end = steps.last().unwrap().matched.end;
+                    let mut subreports = Vec::new();
+                    reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
+                    reports = vec![Report { matched, name: steps[0].node.named.clone(), subreports }];
+                };
+            }
             Path::None => panic!("Should not be any None path when compiling report"),
         }
         reports
@@ -323,6 +344,28 @@ impl<'a> Path<'a> {
     }
 }
 
+/*
+trait Walker<'a> {
+    fn make_report(&self) -> Report;
+}
+fn xxx<T: Walker, U: >(steps: &mut Vec<T>) -> Vec<Report> {
+    let mut reports = Vec::<Report>::new();
+    // The first step represents 0 matches, it should be skipped if there are any others
+    for step in steps.iter().skip(if steps.len() > 1 {1} else {0}) {
+        let mut subreport = step.make_report();
+        if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
+        else { reports.push(subreport); }
+    }
+    if steps[0].node.name_outside {
+        let mut matched = steps[0].matched;
+        matched.end = steps.last().unwrap().matched.end;
+        let mut subreports = Vec::new();
+        reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
+        reports = vec![Report { matched, name: steps[0].node.named.clone(), subreports }];
+    };
+    reports
+}
+*/
 /// Trace Levels
 /// level 1: just trace phase
 /// level 2: trace start of walks
@@ -451,7 +494,16 @@ impl<'a> Debug for Path<'a> {
 // Step struct method definitions
 //
 //////////////////////////////////////////////////////////////////
-
+/*
+impl<'a> Walker<'a> for CharsStep<'a> {
+    /// Compiles a **Report** object from this path and its children after a successful search
+    fn make_report(&self) -> Report<'a> {
+        Report {matched: self.matched,
+                 name: self.node.named.clone(),
+                 subreports: Vec::<Report<'a>>::new()}
+    }
+}
+*/
 // Any way to make walk() generic?
 impl<'a> CharsStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
@@ -481,18 +533,27 @@ impl<'a> CharsStep<'a> {
         } else { None }
     }
 
-    /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report {
+    fn make_report(&self) -> Report<'a> {
         Report {matched: self.matched,
                  name: self.node.named.clone(),
-                 subreports: Vec::<Report>::new()}
+                 subreports: Vec::<Report<'a>>::new()}
     }
 
     fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self);
     }
 }
+/*
+impl<'a> Walker<'a> for SpecialStep<'a> {
+    /// Compiles a **Report** object from this path and its children after a successful search
+    fn make_report(&self) -> Report<'a> {
+        Report {matched: self.matched,
+                name: self.node.named.clone(),
+                subreports: Vec::<Report<'a>>::new()}
+    }
 
+}
+*/
 impl<'a> SpecialStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a SpecialNode, matched: Matched<'a>) -> Path<'a> {
@@ -522,10 +583,10 @@ impl<'a> SpecialStep<'a> {
     }
 
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report {
+    fn make_report(&self) -> Report<'a> {
         Report {matched: self.matched,
                 name: self.node.named.clone(),
-                subreports: Vec::<Report>::new()}
+                subreports: Vec::<Report<'a>>::new()}
     }
 
     fn dump(&self, rank: usize, indent: usize) {
@@ -533,6 +594,16 @@ impl<'a> SpecialStep<'a> {
     }
 }
 
+/*
+impl<'a> Walker<'a> for RangeStep<'a> {
+    /// Compiles a **Report** object from this path and its children after a successful search
+    fn make_report(&self) -> Report<'a> {
+        Report {matched: self.matched,
+                name: self.node.named.clone(),
+                subreports: Vec::<Report<'a>>::new()}
+    }
+}
+*/
 impl<'a> RangeStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a RangeNode, matched: Matched<'a>) -> Path<'a> {
@@ -562,17 +633,30 @@ impl<'a> RangeStep<'a> {
     }
 
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report {
+    fn make_report(&self) -> Report<'a> {
         Report {matched: self.matched,
                 name: self.node.named.clone(),
-                subreports: Vec::<Report>::new()}
+                subreports: Vec::<Report<'a>>::new()}
     }
-
     fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self);
     }
 }
-
+/*
+impl<'a> Walker<'a> for AndStep<'a> {
+    /// Compiles a **Report** object from this path and its children after a successful search
+    fn make_report(&'a self) -> Report<'a> {
+        let mut reports = Vec::<Report<'a>>::new();
+        for p in &self.child_paths {
+            let mut subreports = p.gather_reports();
+            reports.append(&mut subreports);
+        }
+        Report { matched: self.matched,
+                 name: self.node.named.clone(),
+                 subreports: reports}
+    }
+}
+*/
 impl<'a> AndStep<'a> {
     /// start a Path using an And node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a AndNode, matched: Matched<'a>) -> Path<'a> {
@@ -663,8 +747,8 @@ impl<'a> AndStep<'a> {
     }
     
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report {
-        let mut reports = Vec::<Report>::new();
+    fn make_report(&'a self) -> Report<'a> {
+        let mut reports = Vec::<Report<'a>>::new();
         for p in &self.child_paths {
             let mut subreports = p.gather_reports();
             reports.append(&mut subreports);
@@ -680,7 +764,17 @@ impl<'a> AndStep<'a> {
     }
         
 }
-
+/*
+impl<'a> Walker<'a> for OrStep<'a> {
+    /// Compiles a **Report** object from this path and its child after a successful search
+    fn make_report(&self) -> Report<'a> {
+        let subreports = self.child_path.gather_reports();
+        Report { matched: self.matched,
+                 name: self.node.named.clone(),
+                 subreports}
+    }
+}
+*/
 /// OR does not have a *step()* function because it cannot have a repeat count (to repeat an OR it must be enclosed in an AND)
 impl<'a> OrStep<'a> {
     
@@ -789,7 +883,7 @@ impl<'a> Clone for Matched<'a> {
 
 impl<'a> Matched<'a> {
     /// Returns the length of the match in bytes
-    pub fn len(&self) -> usize { self.end - self.start }
+    pub fn len_bytes(&self) -> usize { self.end - self.start }
     /// Returns the length of the match in chars
     pub fn len_chars(&self) -> usize { self.string().chars().count() }
     /// Returns pointer to the matching str slice
@@ -814,13 +908,8 @@ impl<'a> Matched<'a> {
     /// **abbrev()** is used in the pretty-print of steps: The display prints out the string at the start of the step. If it is too
     /// long it distracts from the other output. **abbrev** limits the length of the displayed string by replacing its end with "..."
     fn abbrev(&self) -> String {
-        let s = &self.full_string[self.start..];
-        let dots = if self.len() < unsafe { ABBREV_LEN } {""} else {"..."};
+        let s = &self.full_string[self.start..].chars().take(crate::get_abbrev()).collect::<String>();
+        let dots = if s.len() < self.full_string.len() - self.start {"..."} else {""};
         format!("\"{}\"{}", s, dots)
     }
 }
-
-// TODO: get rid of unsafe
-/// Set the length a String can be before it is abbreviated
-pub fn set_abbrev_size(size: u32) { unsafe {ABBREV_LEN = size as usize; }}
-static mut ABBREV_LEN: usize = 5;
