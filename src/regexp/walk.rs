@@ -344,24 +344,20 @@ impl<'a> Path<'a> {
     }
 }
 
-/*
 trait Walker<'a> {
-    fn make_report(&self) -> Report;
+    fn make_report(&'a self) -> Report<'a>;
+    fn name_details(&self) -> (&Option<String>, bool);
+    fn get_matched(&self) -> Matched;
 }
-fn xxx<T: Walker, U: >(steps: &mut Vec<T>) -> Vec<Report> {
-    let mut reports = Vec::<Report>::new();
-    // The first step represents 0 matches, it should be skipped if there are any others
-    for step in steps.iter().skip(if steps.len() > 1 {1} else {0}) {
-        let mut subreport = step.make_report();
-        if subreport.name.is_none() { reports.append(&mut subreport.subreports); }
-        else { reports.push(subreport); }
-    }
-    if steps[0].node.name_outside {
+/*
+fn handle_name_outside< T: Walker<'a>>(steps: &mut Vec<T>, mut reports: Vec<Report<'a>>) -> Vec<Report<'a>> {
+    let details = steps[0].name_details();
+    if details.1 {
         let mut matched = steps[0].matched;
         matched.end = steps.last().unwrap().matched.end;
         let mut subreports = Vec::new();
         reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
-        reports = vec![Report { matched, name: steps[0].node.named.clone(), subreports }];
+        reports = vec![Report { matched, name: details.0.clone(), subreports }];
     };
     reports
 }
@@ -494,16 +490,18 @@ impl<'a> Debug for Path<'a> {
 // Step struct method definitions
 //
 //////////////////////////////////////////////////////////////////
-/*
+
 impl<'a> Walker<'a> for CharsStep<'a> {
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report<'a> {
+    fn make_report(&'a self) -> Report<'a> {
         Report {matched: self.matched,
                  name: self.node.named.clone(),
                  subreports: Vec::<Report<'a>>::new()}
     }
+    fn name_details(&self) -> (&Option<String>, bool) { (&self.node.named, self.node.name_outside) }
+    fn get_matched(&self) -> Matched { self.matched }
 }
-*/
+
 // Any way to make walk() generic?
 impl<'a> CharsStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
@@ -532,28 +530,29 @@ impl<'a> CharsStep<'a> {
             Some(step)
         } else { None }
     }
-
+/*
     fn make_report(&self) -> Report<'a> {
         Report {matched: self.matched,
                  name: self.node.named.clone(),
                  subreports: Vec::<Report<'a>>::new()}
     }
-
+*/    
     fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self);
     }
 }
-/*
+
 impl<'a> Walker<'a> for SpecialStep<'a> {
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report<'a> {
+    fn make_report(&'a self) -> Report<'a> {
         Report {matched: self.matched,
                 name: self.node.named.clone(),
                 subreports: Vec::<Report<'a>>::new()}
     }
-
+    fn name_details(&self) -> (&Option<String>, bool) { (&self.node.named, self.node.name_outside) }
+    fn get_matched(&self) -> Matched { self.matched }
 }
-*/
+
 impl<'a> SpecialStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a SpecialNode, matched: Matched<'a>) -> Path<'a> {
@@ -581,29 +580,30 @@ impl<'a> SpecialStep<'a> {
             Some(step)
         } else { None }
     }
-
+/*
     /// Compiles a **Report** object from this path and its children after a successful search
     fn make_report(&self) -> Report<'a> {
         Report {matched: self.matched,
                 name: self.node.named.clone(),
                 subreports: Vec::<Report<'a>>::new()}
     }
-
+*/
     fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?} ", "", 4*indent, rank, self,);
     }
 }
 
-/*
 impl<'a> Walker<'a> for RangeStep<'a> {
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report<'a> {
+    fn make_report(&'a self) -> Report<'a> {
         Report {matched: self.matched,
                 name: self.node.named.clone(),
                 subreports: Vec::<Report<'a>>::new()}
     }
+    fn name_details(&self) -> (&Option<String>, bool) { (&self.node.named, self.node.name_outside) }
+    fn get_matched(&self) -> Matched { self.matched }
 }
-*/
+
 impl<'a> RangeStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a RangeNode, matched: Matched<'a>) -> Path<'a> {
@@ -631,18 +631,19 @@ impl<'a> RangeStep<'a> {
             Some(step)
         } else { None }
     }
-
+/*
     /// Compiles a **Report** object from this path and its children after a successful search
     fn make_report(&self) -> Report<'a> {
         Report {matched: self.matched,
                 name: self.node.named.clone(),
                 subreports: Vec::<Report<'a>>::new()}
-    }
+}
+    */
     fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self);
     }
 }
-/*
+
 impl<'a> Walker<'a> for AndStep<'a> {
     /// Compiles a **Report** object from this path and its children after a successful search
     fn make_report(&'a self) -> Report<'a> {
@@ -655,8 +656,10 @@ impl<'a> Walker<'a> for AndStep<'a> {
                  name: self.node.named.clone(),
                  subreports: reports}
     }
+    fn name_details(&self) -> (&Option<String>, bool) { (&self.node.named, self.node.name_outside) }
+    fn get_matched(&self) -> Matched { self.matched }
 }
-*/
+
 impl<'a> AndStep<'a> {
     /// start a Path using an And node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
     pub fn walk(node: &'a AndNode, matched: Matched<'a>) -> Path<'a> {
@@ -745,7 +748,7 @@ impl<'a> AndStep<'a> {
         }
         ret
     }
-    
+/*    
     /// Compiles a **Report** object from this path and its children after a successful search
     fn make_report(&'a self) -> Report<'a> {
         let mut reports = Vec::<Report<'a>>::new();
@@ -757,24 +760,26 @@ impl<'a> AndStep<'a> {
                  name: self.node.named.clone(),
                  subreports: reports}
     }
-
+*/
     pub fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self, );
         self.child_paths.iter().for_each(|x| x.dump(indent + 1));
     }
         
 }
-/*
+
 impl<'a> Walker<'a> for OrStep<'a> {
     /// Compiles a **Report** object from this path and its child after a successful search
-    fn make_report(&self) -> Report<'a> {
+    fn make_report(&'a self) -> Report<'a> {
         let subreports = self.child_path.gather_reports();
         Report { matched: self.matched,
                  name: self.node.named.clone(),
                  subreports}
     }
+    fn name_details(&self) -> (&Option<String>, bool) { (&self.node.named, self.node.name_outside) }
+    fn get_matched(&self) -> Matched { self.matched }
 }
-*/
+
 /// OR does not have a *step()* function because it cannot have a repeat count (to repeat an OR it must be enclosed in an AND)
 impl<'a> OrStep<'a> {
     
@@ -842,7 +847,7 @@ impl<'a> OrStep<'a> {
         }
         ret.starts_with("true")
     }
-    
+/*
     /// Compiles a **Report** object from this path and its child after a successful search
     fn make_report(&self) -> Report {
         let subreports = self.child_path.gather_reports();
@@ -850,7 +855,7 @@ impl<'a> OrStep<'a> {
                  name: self.node.named.clone(),
                  subreports}
     }
-
+*/
     pub fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?} {4} of {5}", "", 4*indent, rank, self, self.which, self.node.nodes.len());
         self.child_path.dump(indent + 1);

@@ -304,8 +304,8 @@ fn former_bugs() {
     find(false, r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
 }
 
-fn report_test<'a>(re: &'a str, text: &'a str, func: fn(&Report)) {
-    let tree = parse_tree(re, false).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+fn report_test<'a>(re: &'a str, text: &'a str, alt: bool, func: fn(&Report)) {
+    let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
     let path = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
 
     let report = Report::new(&path);
@@ -332,38 +332,38 @@ fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (us
 #[test]
 fn reports() {
     // basic
-    report_test("asd", ".asd.", |report: &Report| {
+    report_test("asd", ".asd.", false, |report: &Report| {
         check_report(report, "asd", (1, 4), (1, 4), 0);
     });
     // basic, unicode
-    report_test("你好", ".你好.", |report: &Report| {
+    report_test("你好", ".你好.", false, |report: &Report| {
         check_report(report, "你好", (1, 3), (1, 7), 0); }
     );
     // simple AND
-    report_test(r"ab\(cd\)ef", ".abcdef.", |report: &Report| {
+    report_test(r"ab\(cd\)ef", ".abcdef.", false, |report: &Report| {
         check_report(report, "abcdef", (1, 7), (1, 7), 1);
         check_report(&report.subreports[0], "cd", (3, 5), (3, 5), 0);
     });
     // simple AND unicode
-    report_test(r"ab\(你\)好ef", ".ab你好ef.", |report: &Report| {
+    report_test(r"ab\(你\)好ef", ".ab你好ef.", false, |report: &Report| {
         check_report(report, "ab你好ef", (1, 7), (1, 11), 1);
         check_report(&report.subreports[0], "你", (3, 4), (3, 6), 0);
         assert!(report.get_by_name("fred").is_empty());
     });
 
     // nested and with repetition
-    report_test(r"ab\(cd\(ef\)+\)+", ".abcdefefcd.", |report: &Report| {
+    report_test(r"ab\(cd\(ef\)+\)+", ".abcdefefcd.", false, |report: &Report| {
         check_report(report, "abcdefef", (1, 9), (1, 9), 1);
         check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
         check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
         check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
     });
     // silent AND
-    report_test(r"ab\(?cd\)ef", ".abcdef.", |report: &Report| {
+    report_test(r"ab\(?cd\)ef", ".abcdef.", false, |report: &Report| {
         check_report(report, "abcdef", (1, 7), (1, 7), 0);
     });
     // named
-    report_test(r"ab\(?<first>cd\(?<second>ef\)+\)+", ".abcdefefcd.", |report| {
+    report_test(r"ab\(?<first>cd\(?<second>ef\)+\)+", ".abcdefefcd.", false, |report| {
         check_report(report, "abcdefef", (1, 9), (1, 9), 1);
         check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
         check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
@@ -480,3 +480,18 @@ fn alt_err() {
     e_check(true, r"use(asd()", 113);
     e_check(true, r"use(no-such-file)", 114);
 }
+
+#[test]
+// check that X*<NAME> and X<NAME>* behave right
+fn alt_report() {
+    report_test(r"a and('bc'<n1>* '你好'*<n2>)", "xabcbc你好你好", true, |report| {
+        check_report(report, "abcbc你好你好", (1, 10), (1, 18), 3);
+        check_report(&report.subreports[0], "bc", (2, 4), (2, 4), 0);
+        check_report(&report.subreports[1], "bc", (4, 6), (4, 6), 0);
+        check_report(&report.subreports[2], "你好你好", (6, 10), (6, 18), 0);
+        let n1 = report.get_by_name("n1");
+        assert_eq!(n1.len(), 2, "<n>* test failed");
+        let n2 = report.get_by_name("n2");
+        assert_eq!(n2.len(), 1, "*<n> test failed");
+    });
+} 
