@@ -242,23 +242,26 @@ fn special_chars() {
     find(false, r"\a\u+", "你好abCD没有", "bCD");
 }
     
-// #[test]
-// fn set_chars() {
-//     find(r"[abc]+", "xabacaacd", "abacaac");
-//     find(r"z[abc]*z", "abzzcd", "zz");
-//     find(r"z[abc]*z", "abzaabczcd", "zaabcz");
-//     not_find(r"z[abc]*z", "abzaabcdzcd");
-//     find(r"z[a-m]*z", "abzabclmzxx", "zabclmz");
-//     find(r"[a-mz]+", "xyzabclmzxx", "zabclmz");
-// }
+#[test]
+fn set_chars() {
+    find(false, r"[abc]+", "xabacaacd", "abacaac");
+    find(false, r"z[abc]*z", "abzzcd", "zz");
+    find(false, r"z[abc]*z", "abzaabczcd", "zaabcz");
+    not_find(false, r"z[abc]*z", "abzaabcdzcd");
+    find(false, r"z[a-m]*z", "abzabclmzxx", "zabclmz");
+    find(false, r"[a-mz]+", "xyzabclmzxx", "zabclmz");
+    find(false, r"[a\wx-z]+", "qa x\ty\nz q", "a x\ty\nz ");
+}
 
 // #[test]
-// fn non_set_chars() {
-//     find("a[^hgf]*", "aabcdefghij", "aabcde");
-//     find("a[^e-m]*", "aabcdefghij", "aabcd");
-//     find("a[^-e-m]*", "xab-cdefghij", "ab");
-//     not_find("[^abcd]+", "abcdab");
-// }
+fn non_set_chars() {
+    find(false, "a[^hgf]*", "aabcdefghij", "aabcde");
+    find(false, "a[^e-m]*", "aabcdefghij", "aabcd");
+    find(false, "a[^-e-m]*", "xab-cdefghij", "ab");
+    not_find(false, "[^abcd]+", "abcdab");
+    find(false, r"[^\d\l]*", "ABCd123", "ABC");
+    find(false, r"[^\d\l]*", "ABCD123", "ABCD");
+}
 
 #[test]
 fn basic_or() {
@@ -402,7 +405,12 @@ fn e_check(alt: bool, re: &str, ecode: usize) {
         Err(error) => assert!(error.code == ecode, "Parsing \"{}\", expected error {}, found error {} ({})", re, ecode, error.code, error.msg),
     }
 }
-    
+#[test]
+#[should_panic]
+fn infinite_loop() {
+    find(true, r"and('x'*)*", "abcd", "abccc");
+}
+
 #[test]
 fn errors() {
     e_check(false, r"abc\(de", 1);

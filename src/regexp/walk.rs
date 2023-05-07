@@ -91,7 +91,6 @@ impl<'a> Path<'a> {
         }
     }
 
-        
     pub fn range(&self) -> (usize, usize) {
         let (first, last) = self.first_last();
         (first.start, last.end)
@@ -286,7 +285,7 @@ impl<'a> Path<'a> {
                     let mut subreports = Vec::new();
                     reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
                     reports = vec![Report { matched, name: steps[0].node.named.clone(), subreports }];
-                };
+                }
             },
             Path::Special(steps) => {
                 for step in steps.iter().skip(if steps.len() > 1 {1} else {0}) {
@@ -343,6 +342,18 @@ impl<'a> Path<'a> {
         }
     }
 }
+
+// TODO: This should have a Result<> return, but it is a late addition and I don't really have the incentive to
+// change all the return types now
+// I think new steps cannot go backwards, so if any step but step 0 has a series of matches of length 0 (maybe even
+// 2) it means an infinite loop. I chose to call this every 30 steps, but if the max level is set less than max
+// I assume the caller knows what he is doing
+fn loop_check(&matched: &Matched, limits: &Limits) {
+    if matched.len_bytes() == 0 && limits.max == EFFECTIVELY_INFINITE {
+        panic!("Appears to be an infinite loop");
+    }
+}
+    
 
 trait Walker<'a> {
     fn make_report(&'a self) -> Report<'a>;
@@ -667,6 +678,7 @@ impl<'a> AndStep<'a> {
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
             let len = steps.len();
+            if  len % 30 == 29 { loop_check(&steps.last().unwrap().matched, &node.limits); }
             match steps[len - 1].step() {
                 Some(s) => {
                     trace_pushing::<AndStep>(&s, steps.len());
@@ -789,6 +801,8 @@ impl<'a> OrStep<'a> {
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
             if let Some(s) = steps.last().unwrap().step() {
+                let len = steps.len();
+                if  len % 30 == 29 { loop_check(&s.matched, &node.limits); }
                 trace_pushing::<OrStep>(&s, steps.len());
                 steps.push(s);
             } else { break; }

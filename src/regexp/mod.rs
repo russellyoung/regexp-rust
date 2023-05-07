@@ -245,6 +245,7 @@ pub struct RangeNode {
     chars: String,
     /// An array of ranges that can contain the given character
     ranges: Vec<Range>,
+    specials: Vec<char>,
     /// Not used in traditional parser, in alternative one tells
     /// whether it is whether each repetition is named, or the name
     /// refers to all the repetitions
@@ -429,7 +430,7 @@ impl Debug for SpecialNode {
     
 impl SpecialNode {
     /// These are the defined escaped characters that are recognized as special codes
-    const ESCAPE_CODES: &str = "adluox";
+    const ESCAPE_CODES: &str = "adluowx";
     
     /// Traditional parser for Special Character units, escape
     /// sequences with special meaning ('\x' for hex) or characters
@@ -440,7 +441,7 @@ impl SpecialNode {
         let mut node = SpecialNode::default();
         if trace(2) { trace_enter("SPECIAL", chars); }
         match (chars.next(), chars.peek()) {
-            (Some('\\'), _) => node.special = chars.next().unwrap(),
+            (Some('\\'), Some(_)) => node.special = chars.next().unwrap(),
             (Some('.'), _) => node.special = '.',
             (Some('$'), _) => node.special = '$',
             (_, _) => panic!("Bad value passed to SpecialNode::parse_node()"),
@@ -449,25 +450,34 @@ impl SpecialNode {
         Ok(Node::Special(node))
     }
 
-    /// Checks whehter the given character at the front of the string
+    /// Checks whether the given character at the front of the string
     /// matches this node
     fn matches(&self, string: &str) -> Option<usize> {
+        if SpecialNode::char_match(self.special, string) {
+            Some(if self.special == '$' {0} else { char_bytes(string, 1) })
+        } else { None }
+    }
+
+    /// Checks if a character at the front of the strign matches. This is used to allow special chars in Ranges
+    fn char_match(sp_ch: char, string: &str) -> bool {
         if let Some(ch) = string.chars().next() {
-            if match self.special {
+            match sp_ch {
                 '.' => true,
                 'a' => (' '..='~').contains(&ch),   // ascii printable
                 'd' => ('0'..='9').contains(&ch),   // numeric
                 'l' => ('a'..='z').contains(&ch),   // lc ascii
+                'n' => ch == '\n',
+                't' => ch == '\t',
                 'o' => ('0'..='7').contains(&ch),   // octal digit
                 'u' => ('A'..='Z').contains(&ch),   // uc ascii
+                'w' => " \t\n".contains(ch),       // whitespace
                 'x' => ('A'..='F').contains(&ch)    // hex digit
                     || ('a'..='f').contains(&ch)
                     || ('0'..='9').contains(&ch),
                 _ => false }
-            { return Some(char_bytes(string, 1)); }
-        } else if self.special == '$' { return Some(0); }
-        None
+        } else { sp_ch == '$' }
     }
+    
     fn desc(&self, indent: usize) { println!("{0:1$}{2:?}", "", indent, self); }
 }
 
@@ -517,7 +527,8 @@ impl RangeNode {
             match chars.peek_n(3)[..] {
                 [Some(']'), _, _] => { chars.consume(1); break; },
                 [Some('\\'), Some(ch1), _] => {
-                    node.chars.push(RangeNode::escapes(ch1));
+                    if SpecialNode::ESCAPE_CODES.contains(ch1) || "nt".contains(ch1) { node.specials.push(ch1); }
+                    else { node.chars.push(ch1); }
                     chars.consume(2);
                 },
                 [Some(ch0), Some('-'), Some(']')] => {
@@ -537,24 +548,15 @@ impl RangeNode {
         Ok(Node::Range(node))
     }
 
-    /// A reduced number of escaped characters are recognized in Range
-    /// definitions. Any escaped character not in the recognized set
-    /// is just mapped to itself, useful to include ']' among others.
-    fn escapes(ch: char) -> char {
-        match ch {
-            't' => '\t',
-            'n' => '\n',
-            c => c
-        }
-    }
-
     /// Checks whehter the given character at the front of the string
     /// matches this node
     fn matches(&self, string: &str) -> Option<usize> {
         if let Some(ch) = string.chars().next() {
-            if self.not != (self.chars.contains(ch) || self.ranges.iter().any(|x| x.contains(ch))) {
-                Some(char_bytes(string, 1))
-            } else { None }
+            if self.not != (self.chars.contains(ch) ||
+                            self.ranges.iter().any(|x| x.contains(ch)) ||
+                            self.specials.iter().any(|ch|SpecialNode::char_match(*ch, string)))
+            { Some(char_bytes(string, 1))}
+            else { None }
         } else { None }
     }
 
@@ -566,6 +568,10 @@ impl std::fmt::Display for RangeNode {
         let mut string = "[".to_string();
         if self.not { string.push('^')};
         string.push_str(self.chars.as_str());
+        for ch in self.specials.iter() {
+            string.push('\\');
+            string.push(*ch);
+        }
         for x in self.ranges.iter() {
             string.push_str(x.to_string().as_str());
         }
@@ -876,6 +882,8 @@ impl CharsNode {
                     chars_node.string.push(CharsNode::escaped_chars(ch1));
                     chars.consume(2);
                 }
+                (Some('.'), _) |
+                (Some('$'), _) => new_node = SpecialNode::alt_parse_node(chars)?,
                 (Some('['), _) => new_node = RangeNode::alt_parse_node(chars.consume(1))?,
                 (Some(_), _) => chars_node.string.push(chars.next().unwrap()),
                 (None, _) => { return Err(Error::make(102, "Unterminated character block"))},
@@ -910,7 +918,7 @@ impl CharsNode {
         Ok(match nodes.len() {
             0 => Node::None,
             1 => nodes.pop().unwrap(),
-            _ => Node::And(AndNode {limits: Limits::default(), named: None, nodes, anchor: false, name_outside: false}),
+            _ => Node::And(AndNode {limits: Limits::default(), named: None, nodes, anchor: false, name_outside: true}),
         })
     }
 
@@ -1324,7 +1332,7 @@ impl<'a> Report<'a> {
     pub fn len_bytes(&self) -> usize { self.matched.len_bytes() }
     /// Gets the length of the match in chars
     pub fn len_chars(&self) -> usize { self.matched.len_chars() }
-
+    pub fn full_string(&self) -> &str { self.matched.full_string }
     /// Pretty-prints a report with indentation to help make it easier to read
     pub fn display(&self, indent: usize) {
         let name_str = { if let Some(name) = &self.name { format!("<{}> ", name) } else { "".to_string() }};
@@ -1368,6 +1376,7 @@ impl<'a> Report<'a> {
         }
         hash
     }
+
 }
 
 //////////////////////////////////////////////////////////////////

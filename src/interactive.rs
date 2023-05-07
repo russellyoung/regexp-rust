@@ -18,22 +18,48 @@ use crate::Config;
 use std::io;
 use std::io::Write;    
 use std::collections::HashMap;
+use core::fmt::{Debug,};
 
 const PROMPT: &str = "> ";
 
-/// The structure used to run an interactive session
+struct RegExp {
+    re: String,
+    alt_parser: bool
+}
+
+impl Debug for RegExp {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} regular expression \"{}\"", if self.alt_parser {"alternative" } else { "traditional" }, self.re)
+    }
+}
+
+impl RegExp {
+    fn guess_type(maybe_re: &str) -> Option<RegExp> {
+        let (prompt, dflt) = if maybe_re.contains("and(") || maybe_re.contains("or(") || maybe_re.contains("get(") {
+            ("This looks like an alternative RE type. It is t[raditional], [alternative], c[ancel]", 1)
+        } else if maybe_re.contains('\\') || maybe_re.contains('*') || maybe_re.contains('+') {
+            ("This looks like a traditional RE type: [traditional], a[lternative], c[ancel]", 0)
+        } else {
+            ("This doesn't look like a regular expression. It is: [traditional], [alternative], c[ancel]", 2)
+        };
+        match get_response(prompt, vec!["traditional", "alternative", "cancel"], dflt) {
+            "alternative" => Some(RegExp {re: maybe_re.to_string(), alt_parser: true}),
+            "traditional" => Some(RegExp {re: maybe_re.to_string(), alt_parser: false}),
+            _ => None
+        }
+    }
+}
+    /// The structure used to run an interactive session
 pub(crate) struct Interactive {
     /// the list of regular expressions, last one is the current value
-    res: Vec<String>,
+    res: Vec<RegExp>,
     /// the list of target strings, last one is the current value
     texts: Vec<String>,
     // Interesting: I stored cmd_parse_tree here to avoid having to recompute it each time, and found
     // it caused a borrow violation. Moving it out and passing it as an extra parameter to where it is used
     // removed the problem. Lesson learned.
     // the tree used to parse the user commands, parsed from CMD_PARSE_RE, to save it from having to be reparsed every time
-    //    cmd_parse_tree: Node,
-    /// the prompt string to use: can be reset (originally it was to reflect the state, now it is constant and this can be removed)
-    prompt_str: String,
+    // cmd_parse_tree: Node,
 }
 
 /// a RE used to parse the command line each time it is entered.
@@ -45,7 +71,8 @@ pub(crate) struct Interactive {
 //  - tail:  everything after the secondword
 //  - all: the whole command, trimmed
 
-const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtsfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)\|$ *\(?<tail>.*\)\)?\)";
+//const CMD_PARSE_RE:&str = r"^ *\(?<all>\(?\(?<cmd>[rtslfwh?][a-z]*\)[^a-z]\|$\) *\(?<body>\(?\(?<subcmd>[a-z]+\)[^a-z]\|$\)\|\(?<num>[0-9]*\)\|$ *\(?<tail>.*\)\)?\)";
+const CMD_PARSE_ALT_RE: &str = r"^and('\w*' '[^\w]'+<words>)+";
 
 /// help text to display
 const HELP_TEXT: &str = r"
@@ -80,47 +107,61 @@ The commands are:
  - ?:            displays this help
 ";
 
-/// gets the matching string for a single named variable from the search results. This is used to parse the used input
-fn get_var<'a>(vars: &HashMap<&'a str, Vec<&'a Report>>, name: &'a str) -> &'a str {
-    if let Some(var) = vars.get(name) { var[0].string() } else { "" }
-}
-
+const COMMANDS: [&str; 7] = ["re", "text", "search", "tree", "walk", "help", "?"];
 /// parse the command from the possily abbreviated version passed in
 fn get_command(cmd: &str) -> &str {
-    if cmd.is_empty() { "" }
-    else if "re".starts_with(cmd) { "re" }
-    else if "text".starts_with(cmd) { "text" }
-    else if "search".starts_with(cmd) { "search" }
-    else if "tree".starts_with(cmd) { "tree" }
-    else if "walk".starts_with(cmd) { "walk" }
-    else if "help".starts_with(cmd) || "?" == cmd { "help" }
-    else { "unrecognized"}
+    if cmd.is_empty() { "" } else {
+        match COMMANDS.iter().filter(|x| x.starts_with(cmd)).collect::<Vec<&&str>>()[..] {
+            [] => "unrecognized",
+            [x] => x,
+            _ => "ambiguous"
+        }
+    }
 }
-    
+
+fn input_substring<'a> (words: &Vec<&'a Report>, from: usize, to: usize) -> &'a str {
+    let len = words.len();
+    if from >= len { "" }
+    else {
+        let r0 = words[from]; 
+        let r1 = if to < len { words[to] } else { words[len - 1] }; 
+        &r0.full_string()[r0.byte_pos().0..r1.byte_pos().1]
+    }
+}
+
+fn int_arg(words: &Vec<&Report>, arg_num: usize, dflt: usize) -> Option <usize> {
+    let arg = input_substring(words, arg_num, arg_num);
+    if arg.is_empty() { Some(dflt) }
+    else if let Ok(num) = arg.parse::<usize>() { Some(num) }
+    else { None }
+}
+
 impl Interactive {
     /// constructor for the session object
     pub(crate) fn new(config: Config) -> Interactive {
-        let mut res = Vec::<String>::new();
-        if !config.re.is_empty() { res.push(config.re.to_string()); }
+        let mut res = Vec::<RegExp>::new();
+        if !config.re.is_empty() { res.push(RegExp {re: config.re.to_string(), alt_parser: config.alt_parser()}); }
         let mut texts = Vec::<String>::new();
-        if !config.text.is_empty() { texts.push(config.text); }
+        if !config.text.is_empty() { texts.push(config.text); };
         Interactive { res,
                       texts,
-//                      tree: Node::None,
-                      prompt_str: PROMPT.to_string(),
+//                      cmd_parse_tree: parse_tree(CMD_PARSE_ALT_RE, true).unwrap()
         }
     }
 
     /// gets the current RE, or None
-    fn re(&self) -> Option<&str> { if self.res.is_empty() { None } else { Some(self.res[self.res.len() - 1].as_str()) }}
+    fn re(&self) -> Option<&RegExp> { self.res.last() }
+    
     /// gets the current search text, or None
-    fn text(&self) -> Option<&str> { if self.texts.is_empty() { None } else { Some(self.texts[self.texts.len() - 1].as_str()) }}
+    fn text(&self) -> Option<&String> {
+        self.texts.last()
+    }
 
     /// starts up the interactive session
     pub(crate) fn run(&mut self) {
         let stdin = io::stdin();
         let mut buffer;
-        let cmd_re = parse_tree(CMD_PARSE_RE, false).unwrap();
+        let cmd_parse_tree = parse_tree(CMD_PARSE_ALT_RE, true).unwrap();
         loop {
             buffer = "".to_string();
             self.prompt();
@@ -129,7 +170,7 @@ impl Interactive {
                 Ok(1) => (),
                 Ok(_x) => {
                     let  _ = buffer.pop();    // pop off trailing CR
-                    if !self.find_command(&buffer, &cmd_re) {break; }
+                    if !self.do_command(&buffer, &cmd_parse_tree) {break; }
                 },
                 Err(_msg) => { break;},
             }
@@ -137,175 +178,143 @@ impl Interactive {
         println!("exit");
     }
 
-    /// tries guessing if a string could be a RE, if it is not sure it asks with **yorn()** (*yes-or-no()*)
-    fn guess_re(&mut self, maybe_re: &str) -> bool {
-        if (maybe_re.contains('\\') || maybe_re.contains('*') || maybe_re.contains('+'))
-            && yorn(&format!("\"{}\" looks like a RE. Is it?", maybe_re), Some(true)) {
-                self.res.push(maybe_re.to_string());
-                true
-            }
-        else { false }
-    }
-
-    /// prints out the session prompt
+    /// prints out the session prompt - maybe in the future it will want to display some information here 
     fn prompt(&mut self) {
-        print!("{} ", self.prompt_str);
+        print!("> ");
         std::io::stdout().flush().unwrap();
     }
 
     /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
-    fn find_command(&mut self, input: &str, cmd_re: &Node) -> bool{
-        let walk = walk_tree(cmd_re, input);
-        println!("{:#?}", walk);
-        if let Ok(Some(path)) = &walk {
-            let report = Report::new(path);
-            let vars = report.get_named();
-            let all = get_var(&vars, "all");
-            let body = get_var(&vars, "body");
-            let tail = get_var(&vars, "tail");
-            let num = get_var(&vars, "num");      // second word if it is numeric
-            let subcmd = get_var(&vars, "subcmd");   // second word if it is alphabetic
-            let cmd = get_var(&vars, "cmd");      // first word
-            self.execute_command(cmd, 
-                                 subcmd,
-                                 num,
-                                 tail,
-                                 body,
-                                 all
-                                 ,)     // everything, trimmed
-        } else {
-            self.execute_command("", "", "", "", "", input)
+    fn do_command(&mut self, input: &str, cmd_parse_tree: &Node) -> bool{
+        match walk_tree(cmd_parse_tree, input) {
+            Ok(Some(path)) => {
+                let report = Report::new(&path);
+                let words = report.get_by_name("words");
+                self.execute_command(&words)
+            },
+            Ok(None) => true,
+            Err(msg) => { println!("{}", msg); true }
         }
     }
 
     /// execute the user commands
-    fn execute_command(&mut self, cmd: &str, subcmd: &str, num: &str, tail: &str, body: &str, all: &str) -> bool{
-        //println!("cmd: '{}', subcmd: '{}', num: '{}', tail: '{}', body: '{}', all: '{}'", cmd, subcmd, num, tail, body, all);
-        match get_command(cmd) {
-            "" => { if !all.is_empty() && !self.guess_re(all) { println!("Unrecognized command"); }},
-            "re" => self.do_re(subcmd, num, tail, body),
-            "text" => self.do_text(subcmd, num, tail, body),
-            "search" => self.do_search(subcmd),
+    fn execute_command(&mut self, words: &Vec<&Report>) -> bool {
+        match get_command(words[0].string()) {
+            "re" => self.do_re(words),
+            "text" => self.do_text(words),
+            "search" => self.do_search(words),
             "help" | "?" => println!("{}", HELP_TEXT),
-            "walk" => self.do_walk(if let Ok(num) = num.parse::<usize>() { num } else { 2 }),
             "quit" => { return false; },
-            "exit" => { if yorn("Really exit?", Some(true)) { return false; } }
-            "tree" => {
-                if let Some(re) = self.re() {
-                    match parse_tree(re, false) {
-                        Ok(node) => { println!("--- Parse tree:"); node.desc(0); }
-                        Err(error) => println!("Error parsing tree: {}", error),
-                    }
-                } else { println!("No current RE, first enter one"); }
-            },
+            "exit" => { return get_response("Really exit?", vec!["[yes]", "n[o]"], 0) == "no"; },
+            "tree" => self.do_tree(words),
+            "" => (),
             "unrecognized" => println!("unrecognized command"),
+            "ambiguous" => println!("ambiguous command"),
             _ => (),
         }
         true
     }
 
     /// execute a *re* command
-    fn do_re(&mut self, subcmd: &str, num: &str, tail: &str, body: &str, ) {
-        if !num.is_empty() {
-            if let Ok(num) = num.parse::<usize>() {
-                if num >= self.res.len() { println!("Number too large, no such RE"); }
-                else if num < self.res.len() { 
-                    let re = self.res.remove(self.res.len() - 1 - num);
-                    println!("Using RE \"{}\"", re);
-                    self.res.push(re);
-                } else {}
+    fn do_re(&mut self, words: &Vec<&Report>) {
+        let arg1 = input_substring(words, 1, 1);
+        if arg1.is_empty() {
+            if let Some(re) = self.re() { println!("current RE: \"{:?}\"", re); }
+            else { println!("No REs stored"); }
+        } else if let Ok(num) = arg1.parse::<usize>() {
+            if num >= self.res.len() { println!("There are only {} REs stored", self.res.len()); }
+            else {
+                let re = self.res.remove(self.res.len() - 1 - num);
+                println!("Using {:?}", re);
+                self.res.push(re);
             }
-        } else if !subcmd.is_empty() {
-            if "pop".starts_with(subcmd) {
-                let _ = self.res.pop();
-                if let Some(re) = self.re() {println!("current RE is \"{}\"", re); }
-                else { println!("No current RE"); }
-            } else if "history".starts_with(subcmd) {
-                let len = self.res.len();
-                if len == 0 { println!("No saved REs"); }
-                else { for i in 0..len { println!("  {}: \"{}\"", i, self.res[len - i - 1]); } }
-            } else if "set".starts_with(subcmd) { self.res.push(tail.to_string()); }
-            else if !self.guess_re(body) { println!("Unrecognized subcommand"); }
-        } else if !self.guess_re(body) {
-            if body.is_empty() {
-                if self.res.is_empty() { println!("No current RE"); }
-                else { println!("current RE is \"{}\"", self.res[self.res.len() - 1]); }
-            } else { println!("Unrecognized subcommand"); }
-        }
+        } else if "pop".starts_with(arg1) {
+            let _ = self.res.pop();
+            if let Some(re) = self.re() {println!("current RE is {:?}", re); }
+            else { println!("No current RE"); }
+        } else if "history".starts_with(arg1) || "list".starts_with(arg1) {
+            let len = self.res.len();
+            if len == 0 { println!("No saved REs"); }
+            else { for i in 0..len { println!("  {}: {:?}", i, self.res[len - i - 1]); } }
+        } else if "traditional".starts_with(arg1) {
+            if words.len() == 2 {println!("'re traditional' requires regular expression");}
+            else { self.res.push(RegExp {re: input_substring(words, 2, 1000).to_string(), alt_parser: false}); }
+        } else if "alternative".starts_with(arg1) {
+            if words.len() == 2 {println!("'re alternative' requires regular expression");}
+            else { self.res.push(RegExp {re: input_substring(words, 2, 1000).to_string(), alt_parser: true}); }
+        } else if let Some(re) = RegExp::guess_type(input_substring(words, 1, 1000)) {
+            self.res.push(re);
+        } else { println!("Unrecognized re subcommand"); }
     }
 
     /// execute a *text* command
-    fn do_text(&mut self, subcmd: &str, num: &str, tail: &str, body: &str) {
-        if !num.is_empty() {
-            if let Ok(num) = num.parse::<usize>() {
-                if num >= self.texts.len() { println!("Number too large, no such text"); }
-                else if num < self.texts.len() { 
-                    let text = self.texts.remove(self.texts.len() - 1 - num);
-                    println!("Using text \"{}\"", text);
-                    self.texts.push(text);
-                } else {}
+    fn do_text(&mut self, words:&Vec<&Report>) {
+        let arg1 = input_substring(words, 1, 1);
+        if arg1.is_empty() { 
+            if let Some(text) = self.text() {println!("current text: \"{:?}\"", text); }
+            else { println!("No texts stored"); }
+        } else if let Ok(num) = arg1.parse::<usize>() {
+            if num >= self.texts.len() { println!("Number too large, no such text"); }
+            else {
+                let text = self.texts.remove(self.texts.len() - 1 - num);
+                println!("Using {:?}", text);
+                self.texts.push(text);
             }
-        } else if !subcmd.is_empty() {
-            if "pop".starts_with(subcmd) {
-                let _ = self.texts.pop();
-                if let Some(text) = self.text() {println!("current text is \"{}\"", text); }
-                else { println!("No current text"); }
-            } else if "set".starts_with(subcmd) { self.texts.push(tail.to_string()); }
-            else if "history".starts_with(subcmd) {
-                let len = self.texts.len();
-                if len == 0 { println!("No saved texts"); }
-                else { for i in 0..len { println!("  {}: \"{}\"", i, self.texts[len - i - 1]); } }
-            } else if !body.is_empty() { self.texts.push(body.to_string()); }
-            else if self.texts.is_empty() { println!("No texts saved"); }
-            else { println!("current text is \"{}\"", self.texts[self.texts.len() - 1]); }
-        } else if body.is_empty() {
-            if self.texts.is_empty() { println!("No current text"); }
-            else { println!("current text is \"{}\"", self.texts[self.texts.len() - 1]); }
-        } else { self.texts.push(body.to_string()); }
+        } else if "pop".starts_with(arg1) {
+            let _ = self.texts.pop();
+            if let Some(text) = self.text() {println!("current text is \"{}\"", text); }
+            else { println!("No current text"); }
+        } else if "set".starts_with(arg1) {
+            self.texts.push(input_substring(words, 2, 1000).to_string());
+        } else if "history".starts_with(arg1) {
+            let len = self.texts.len();
+            if len == 0 { println!("No saved texts"); }
+            else { for i in 0..len { println!("  {}: \"{}\"", i, self.texts[len - i - 1]); } }
+        } else { self.texts.push(input_substring(words, 1, 1000).to_string()); }
     }
 
-    fn do_search(&self, subcmd: &str) {
-        let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return;}};
-        let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return; }};
-        println!("Searching for \"{}\" in \"{}\"", re, text);
-        match parse_tree(re, false) {
-            Ok(node) => {
-                match walk_tree(&node, text) {
-                    Ok(Some(path)) => {
-                        let report = Report::new(&path);
-                        if subcmd.is_empty() { report.display(0) }
-                        else {
-                            let matches = report.get_by_name(subcmd);
-                            if matches.is_empty() { println!("No named matches for \"{}\"", subcmd); }
-                            else {
-                                for (i, matched) in matches.iter().enumerate() {
-                                    println!("  {}) \"{}\", position {}", i, matched.string(), matched.byte_pos().0); }
-                                //for i in 0..matches.len() { println!("  {}) \"{}\", position {}", i, matches[i].found, matches[i].pos.0); }
-                            }
+    fn do_tree(&self, words: &Vec<&Report>) {
+        let trace_level = if let Some(num) = int_arg(words, 1, 0) {
+            num
+        } else {
+            println!("'tree' takes an optional integer argument");
+            return;
+        };
+        if let Some(re) = self.re() {
+            set_trace(trace_level);
+            match parse_tree(&re.re, re.alt_parser) {
+                Ok(node) => { println!("--- Parse tree:"); node.desc(0); }
+                Err(error) => println!("Error parsing tree: {}", error),
+            }
+            set_trace(0);
+        } else { println!("No current RE, first enter one"); }
+    }
+    
+    fn do_search(&self, words: &Vec<&Report>) {
+        let trace_level = if let Some(num) = int_arg(words, 1, 0) {
+            num
+        } else {
+            println!("'search' takes an optional integer argument");
+            return;
+        };
+        match (self.re(), self.text()) {
+            (None, Some(_)) => println!("No current regular expression"),
+            (Some(_), None) => println!("No current text"),
+            (None, None) => println!("No regular expression or text, add some and try again"),
+            (Some(re), Some(text)) => {
+                match parse_tree(re.re.as_str(), re.alt_parser) {
+                    Err(err) => println!("Error parsing RE: {}", err.msg),
+                    Ok(node) => {
+                        set_trace(trace_level);
+                        match walk_tree(&node, text) {
+                            Err(msg) => println!("Error: {}", msg),
+                            Ok(None) => println!("No match"),
+                            Ok(Some(path)) => println!("{:?}", Report::new(&path).display(0)),
                         }
-                    },                                    
-                    Ok(None) => println!("No match"),
-                    Err(error) => println!("Error in search: {}", error)
+                        set_trace(0);
+                    }
                 }
-            },
-            Err(error) => { println!("Error parsing tree: {}", error); },
-        }
-    }
-
-    fn do_walk(&self, trace: usize) {
-        let re = {if let Some(r) = self.re() { r } else { println!("No current RE"); return; }};
-        let text = {if let Some(t) = self.text() { t } else { println!("No current text"); return; }};
-        match parse_tree(re, false) {
-            Ok(node) => {
-                set_trace(trace);
-                match walk_tree(&node, text) {
-                    Ok(Some(path)) => println!("{:?}", Report::new(&path).display(0)),
-                    Ok(None) => println!("No match"),
-                    Err(error) => println!("Error in search: {}", error)
-                }
-                set_trace(0);
-            },
-            Err(error) => println!("Error parsing tree: {}", error),
+            }
         }
     }
 }
@@ -333,3 +342,32 @@ fn yorn(prompt: &str, dflt: Option<bool>) -> bool {
     }
     if let Some(d) = dflt { d } else {yorn(prompt, dflt)}
 }
+
+fn get_response<'a>(prompt: &'a str, choices: Vec<&'a str>, dflt: usize) -> &'a str {
+    let mut buffer = String::new();
+    let stdin = io::stdin();
+    loop {
+        print!("{}: ", prompt);
+        std::io::stdout().flush().unwrap();
+        if let Ok(count) = stdin.read_line(&mut buffer) {
+            if count < 2 { break; }   // take default
+            let _ = buffer.pop();
+            let mut candidate: Option<&str> = None;
+            for c in choices.iter() {
+                if c.starts_with(buffer.as_str()) {
+                    if candidate.is_none() {
+                        candidate = Some(c);
+                    } else {println!("ambiguous response"); }
+                }
+            }
+            if let Some(cmd) = candidate { return cmd; }
+            else { println!("Unrecognized command"); }
+        } else { println!("error reading input"); }
+    }
+    if dflt < choices.len() { return choices[dflt]; }
+    println!("no default response");
+    get_response(prompt, choices, dflt)
+}
+
+
+    

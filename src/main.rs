@@ -71,14 +71,6 @@ use core::sync::atomic::{AtomicIsize, AtomicUsize, AtomicU32, Ordering::{Acquire
 
 use clap::{Parser, value_parser};               // Command Line Argument Processing
 
-/// default value for the **--interactive** switch
-const INTERACTIVE_DEFAULT: bool = false;
-/// default value for the **--tree** switch
-const PRINTTREE_DEFAULT: bool = false;
-/// default value for the **--walk** switch
-const PRINTWALK_DEFAULT: bool = false;
-/// default value for the **--debug** switch
-const DEBUG_DEFAULT: u32 = 0;
 /// default value for the **--Abbrev** switch
 const ABBREV_DEFAULT: u32 = 5;
 /// default value for the **--alt** switch
@@ -148,17 +140,20 @@ pub struct Config {
     #[clap(short, long, default_value_t = String::from(PARSER_DEFAULT))]
     pub parser: String, 
     /// Start up an interactive session (TODO)
-    #[clap(short, long, default_value_t = INTERACTIVE_DEFAULT)]
+    #[clap(short, long, default_value_t = false)]
     pub interactive: bool,
     /// Prints the parsed regexp tree
-    #[clap(short, long, default_value_t = PRINTTREE_DEFAULT)]
+    #[clap(short, long, default_value_t = false)]
     pub tree: bool,
     /// Dumps the current path (the successful path, if called on the result of walk())
-    #[clap(short, long, default_value_t = PRINTWALK_DEFAULT)]
+    #[clap(short, long, default_value_t = false)]
     pub walk: bool,
     /// Prints debug information. 1 - 8 give progressively more data
-    #[clap(short, long, default_value_t = DEBUG_DEFAULT, value_parser=value_parser!(u32).range(0..40))]
+    #[clap(short, long, default_value_t = 0, value_parser=value_parser!(u32).range(0..40))]
     pub debug: u32,
+    /// Prints result for all named units
+    #[clap(short, long, default_value_t = false, )]
+    pub named: bool,
     // length of text to display in the --debug output
     /// When tracing the walk phase abbreviate the display of current string to LENGTH chars
     #[clap(short, long, default_value_t = ABBREV_DEFAULT, value_parser=value_parser!(u32).range(1..))]
@@ -168,7 +163,7 @@ pub struct Config {
 impl Config {
     /// Reads the command line information and performs some cross-member checks difficult to do in *clap*. This returns
     /// a _Config_ instance whose members provide the desired values, or an error if the values are not allowed.
-    fn get() -> Result<Config, &'static str> {
+    fn load() -> Result<Config, &'static str> {
         let config = Config::parse();
         if !"alternative".starts_with(&config.parser) && ! "traditional".starts_with(&config.parser) {
             Err("Choices for parser are 'traditional' or 'alternative'")
@@ -179,6 +174,9 @@ impl Config {
             Err("TEXT is required unless --interactive or --tree given")
         } else {Ok(config)}
     }
+
+    pub fn alt_parser(&self) -> bool { "traditional".starts_with(&self.parser) }
+        
 }
 /// Main function to run regexp as a function. It is called by
 /// > cargo run [-t] [-i] [-d LEVEL] [-a LENGTH] \[REGEXP\] \[TARGET\]
@@ -191,7 +189,7 @@ impl Config {
 ///  - **-d LEVEL** (**--debug LEVEL**): set the debug level to LEVEL. The default level is 0, good values to try are 1, 2, or 3.
 ///  - **-a LENGTH** (**--abbrev LENGTH**): When tracing the walk phase abbreviate the display of current string to LENGTH chars
 pub fn main() {
-    let config = match Config::get() {
+    let config = match Config::load() {
         Ok(cfg) => cfg,
         Err(msg) => {
             println!("{}", msg);
@@ -219,7 +217,17 @@ pub fn main() {
                             path.dump(0);
                             println!("--- End walk");
                         }
-                        println!("{:?}", path); Report::new(&path).display(0);
+                        let report = Report::new(&path);
+                        report.display(0);
+                        if config.named {
+                            for (name, v) in report.get_named() {
+                                if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v.last().unwrap().string()); }
+                                else {
+                                    println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
+                                    v.iter().for_each(|x| println!("    \"{}\"", x.string()));
+                                }
+                            }
+                        }
                     }
                     Ok(None) => println!("No match"),
                     Err(error) => println!("{}", error)
