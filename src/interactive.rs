@@ -17,8 +17,7 @@ use crate::set_trace;
 use crate::Config;
 use std::io;
 use std::io::Write;    
-//use std::collections::HashMap;
-use core::fmt::{Debug,};
+use core::fmt::Debug;
 
 const PROMPT: &str = "> ";
 
@@ -94,14 +93,15 @@ The commands are:
  - text TEXT:      sets new search text
  - text list:      same as 'text history'
  - text history:   lists the most recent regular expressions
- - text NUMBER:    sets the NUMBERth item on the history list to be the current regular expression
+ - text NUMBER:    sets the NUMBERth item on the history list to be the current text
  - text pop [n]:   pops off (deletes) the nth tex string from memory. Defauls to 0 (the current text string)
- - search [lvl]:   performs a RE search using the current RE and the current text. If optional **lvl** is set
-                   run with trace level set to **lvl** to trace out finding the path
- - tree [lvl]:     displays the parse tree for the current regular expression. Optional **lvl** sets the trace level
+ - search :        performs a RE search using the current RE and the current text. 
+ - search NAME1 [NAME2...]: performs a RE search using the current RE and the current text, report only on units with the given names
+ - search * :      performs a RE search using the current RE and the current text, report on all named units
+ - search NUMBER:  performs a RE search using the current RE and the current text setting debug level to NUMBER to examine the path.
+                   This can be combined with search for name.
+ - tree [NUMBER]:  displays the parse tree for the current regular expression. Optional **NUMBER** sets the trace level
                    to see how the parse is performed.
- - walk [level]:   displays the progress as the tree is walked in stage 2 of the search. LEVEL defaults to 2
-                   to provide moderate information, use 1 for less information, 3 for more
  - help:           displays this help
  - ?:              displays this help
 ";
@@ -303,12 +303,20 @@ impl Interactive {
     
     /// executes a **search** command: parses and prints the results for the current regexp and text
     fn do_search(&self, words: &Vec<&Report>) {
-        let trace_level = if let Some(num) = int_arg(words, 1, 0) {
-            num
-        } else {
-            println!("'search' takes an optional integer argument");
-            return;
-        };
+        let mut trace: usize = 0;
+        let mut names = Vec::<&str>::new();
+        let mut all = false;
+        let mut ptr = 1;
+        if words.len() > 1 {
+            if let Ok(num) = words[1].string().parse::<usize>() {
+                trace = num;
+                ptr += 1;
+            }
+            for word in words[ptr..].iter() {
+                if word.string() == "*" { all = true; }
+                names.push(word.string());
+            }
+        }
         match (self.re(), self.text()) {
             (None, Some(_)) => println!("No current regular expression"),
             (Some(_), None) => println!("No current text"),
@@ -317,11 +325,26 @@ impl Interactive {
                 match parse_tree(re.re.as_str(), re.alt_parser) {
                     Err(err) => println!("Error parsing RE: {}", err.msg),
                     Ok(node) => {
-                        set_trace(trace_level);
+                        set_trace(trace);
                         match walk_tree(&node, text) {
                             Err(msg) => println!("Error: {}", msg),
                             Ok(None) => println!("No match"),
-                            Ok(Some(path)) => println!("{:?}", Report::new(&path).display(0)),
+                            Ok(Some(path)) => {
+                                let report = Report::new(&path);
+                                if names.is_empty() { println!("{:?}", report.display(0))}
+                                else if all {
+                                    for (name, matches) in report.get_named() {
+                                        print_named_match(name, &matches);
+                                    }
+                                } else {
+                                    let reports = report.get_named();
+                                    for name in names {
+                                        if let Some(matches) =  reports.get(name) {
+                                            print_named_match(name, matches);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         set_trace(0);
                     }
@@ -330,6 +353,22 @@ impl Interactive {
         }
     }
 }
+
+fn print_named_match(name: &str, matches: &Vec<&Report>) {
+    if matches.len() == 1 {
+        print!("{}: ", name);
+        print_one_named_match(matches.last().unwrap(), "");
+    } else {
+        println!("{} : ", name);
+        matches.iter().for_each(|x| print_one_named_match(x, "    "));
+    }
+}
+fn print_one_named_match(report: &Report, prefix: &str) {
+    let byte_pos = report.byte_pos();
+    let char_pos = report.char_pos();
+    println!("{}\"{}\", byte position ({}, {}], char position [{}, {})",
+             prefix, report.string(), byte_pos.0, byte_pos.1, char_pos.0, char_pos.1);
+}    
 
 /// gets user response to a question. It takes a list of potential reply strings and returns
 /// the matching string if there is one

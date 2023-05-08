@@ -164,7 +164,7 @@ pub struct Config {
     /// Parser to use. Will accept abbreviations. Currently supported are 'traditional' and 'alternative'.
     #[clap(short, long, default_value_t = String::from(PARSER_DEFAULT))]
     pub parser: String, 
-    /// Start up an interactive session (TODO)
+    /// Start up an interactive session
     #[clap(short, long, default_value_t = false)]
     pub interactive: bool,
     /// Prints the parsed regexp tree
