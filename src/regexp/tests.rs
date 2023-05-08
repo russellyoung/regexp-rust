@@ -88,13 +88,6 @@ fn make_or() -> Node {
     Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default(), named: None, name_outside: false})
 }
 
-//fn make_set(not: bool, targets: Vec<SetUnit>, min: usize, max: usize, lazy: bool) -> Node {
-//    Node::SetUnit(SetNode{not, targets, limits: Limits{min, max, lazy}, named: None})
-//}
-//fn push_sets(set_node: &mut SetNode, sets: &mut Vec<Set>) {
-//    set_node.targets.append(sets);
-//}
-
 impl Node {
     fn push(&mut self, node: Node) {
         match self {
@@ -152,22 +145,6 @@ fn or_with_chars_bug() {
     node.push(make_chars_string("ef"));
     assert_eq!(node, parse_tree(r"abc\|def", false).unwrap());
 }
-
-// #[test]
-// fn set_basic() {
-//     let mut node = make_root(1, 1, false);
-//     node.push(make_chars_string(vec![CharsContents::Regular("ab".to_string())]));
-//     let targets = vec![Set::RegularChars("cde".to_string()),];
-//     node.push(make_set(false, targets, 0, EFFECTIVELY_INFINITE, false));
-//     node.push(make_chars_string(vec![CharsContents::Regular("fg".to_string())]));
-//     let targets = vec![Set::RegularChars("h".to_string()),
-//                        Set::Range('i', 'k'),
-//                        Set::RegularChars("lm".to_string()),
-//                        Set::SpecialChar('d')];
-//     node.push(make_set(true, targets, 1, 1, false));
-//     assert_eq!(node, parse_tree(r"ab[cde]*fg[^hi-klm\d]", false).unwrap());
-// }
-
 
 fn find<'a>(alt: bool, re: &'a str, text: &'a str, expected: &'a str) {
     print!("RUNNING '{}' '{}'... ", re, text);

@@ -58,7 +58,32 @@
 //!         Err(error) => Err(error),
 //!     }
 //! }
-//! ```
+///
+/// In addition, there is an alternative style regular expression syntax supported. As I was writing the original parser I noticed
+/// a few things: first, the main difficulty of the sntax was in handling special cases required for the quirky traditional syntax
+/// (examples: infix operator for **or**, characters distributing individually instead of in a group, naming only supported for
+/// **and** nodes, ... I also noticed an elisp program that provided macros to make ubderstanding long, complicated REs easier.
+/// Putting this together I designed a simpler regexp syntax, which made writing a parser to support it much simpler. The basic syntax:
+///
+/// - There are 3 kinds of nodes: **AND** nodes, **OR** nodes, and **CHAR** nodes.
+///   - **AND** nodes are created by using the syntax *"and(...)"
+///   - **OR** nodes are created by using the syntax *"or(...)"
+///   - **CHAR** nodes can be created in a few ways:
+///     - **txt(...)** : explicitly writing the node function
+///     - **'TEXT...'** or **"TEXT..."** : wrapping the text in single or double quotes
+///     - TEXT... : any text entered that is not recognized is assumed to be text. This can be a little
+///          tricky though: first, spaces are seen as separaters rather than characters, so if text contains
+///          whitespace it must use quotes or the function form. Second, there must be a terminating space. For
+///          example, *and( abc)* is not an and with the text node "abc" but is instead an incomplete **AND** node
+///          containing a text node "abc)"
+///   - Repetition is handled like traditional REs, the characters *, +, ?, and {} can trail any unit and have the same meanings
+///   - Naming: Names are assigned to any unit by trailing it with the notation *"<NAME>"*. Names combine with repetition
+///     counts,As an example, __and("ab")<name>*__ matches the string "abab", with named strings 'name: "ab"'
+///     and 'name: "ab"', while __and("ab")*<name>__ matches the string "abab" once with string 'name: "abab".
+///   - Definitions: the alternative syntax also allows defining substrings that can get reinserted multiple times
+///         in a single regular expression. They are defined using the function syntax def(name: RE), which can appear
+///         either in the RE itself or in a file included in the regexp session using the **use(filaneme)** command
+
 pub mod regexp;
 mod interactive;
 

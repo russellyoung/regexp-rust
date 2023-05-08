@@ -31,35 +31,23 @@ a few week's rest I decided to give it a go.
 
 **ALMOST DONE!**
 
+This is almost finished. There are several TODOs to implement, but
+they are for style points, not functionality - wit one exceptiomn,
+lazy evaluation of comlex **OR** nodes, which is marked with a
+TODO. This will be highest priority when I get back to this (which
+will be a few weeks at least - lots of things going on here in the
+next couple months)
+
+
 The back-off bugs have been fixed, and the alternative parser seems to
 be working. I'm pretty happy with it.
 
-What remains: 
-
- -  **interactive** is broken, it needs to be fixed. I've been waiting
-   for the new parser to be ready. There also is an issue that the old
-   command RE in interactive isn't working - is it broken? I want to
-   investigate and see if ti reveals a new bug.
-   
- - I am suspicious that **Report**s might have a problem - I have
-   haven't looked at them since making major changes in the deep
-   structures, and after every change I expected them to break, and
-   they still haven't (at least, not blatantly). I need to convince
-   myself they work for unicode, and that names are handled properly.
-   
- - More tests are needed for the alternate REs
- 
- - And documentation, especially of the alternate parser
-
-
-
-I'm pleased to say it seems to be done. The basic program is working,
-the support environment - testing and documentation - is done, to some
-extent at least (I may add more tests). It even has some extra
-features added, like a couple API functions to make accessing results
-easier, and an interactive mode where a user can keep around a bunch
-of regular expressions and strings to search, and experiment with
-changing them, and even view the RE parse result and the tree walk.
+What remains: Not much. Mainly a few things marked wih TODO that I
+want to fix, especially because some of them have to do with
+lifetimes, and I do want to understand better what is happening. There
+are also a few mores bells and/or whistles I might want to add, and
+some interactive functionality I originally designed in is still not
+done. But basically, this is it.
 
 Writing it has been moderately successful. I am a lot more comfortable
 with Rust than I was. Rewriting the code about 10 times as I

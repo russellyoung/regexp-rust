@@ -91,17 +91,19 @@ impl<'a> Path<'a> {
         }
     }
 
+    /// gets the range of the path, using bytes
     pub fn range(&self) -> (usize, usize) {
         let (first, last) = self.first_last();
         (first.start, last.end)
     }
-        
+
+    /// gets the byte count of the end of the path
     pub fn end(&self) -> usize {
         let (_, last) = self.first_last();
         last.end
     }
         
-    /// the length of the match, in bytes. This means it can be used to extract the unicode string from the string element
+    /// the length of the path, in bytes. This means it can be used to extract the unicode string from the string element
     pub fn match_len(&self) -> usize {
         let (start, end) = self.range();
         end - start
@@ -136,7 +138,16 @@ impl<'a> Path<'a> {
             Path::None => panic!("NONE unexpected"),
         }
     }
-    
+
+    /// used to back off a failed repeated match to see if thte path can be saved. There are 3 steps in
+    /// backing off. The actual implementation depends on whether it is using lazy or greedy match algorithm.
+    ///
+    /// - back off child path (for **AND** and **OR**): if a child path can be backed off try that
+    /// - change subpaths (for **AND** and **OR**) if a path becomes too sort (or too long, for lazy) pop that
+    ///   subpath off and check. For **AND** this means backing off on the previous subpath, for **OR** it means
+    ///   going to the next option
+    /// - back off the last step, check if that still meets the requirements. For greedy evaluation this means popping
+    ///   off a step from the Path, for lazy eval it means adding a new step
     fn back_off(&mut self) -> bool {
         if trace(6) { trace_change_indent(1); }
         let limits = self.limits();
@@ -318,6 +329,7 @@ impl<'a> Path<'a> {
         reports
     }
 
+    /// pretty prints a report using indentation to show inclusion
     pub fn dump(&self, mut indent: usize) {
         if indent == 0 { trace_indent(); println!("PATH {} ------------", self.node_type()); indent = 1;}
         match self {
@@ -348,37 +360,28 @@ impl<'a> Path<'a> {
 // I think new steps cannot go backwards, so if any step but step 0 has a series of matches of length 0 (maybe even
 // 2) it means an infinite loop. I chose to call this every 30 steps, but if the max level is set less than max
 // I assume the caller knows what he is doing
+/// Call to check whether the parser is in an infinite loop. Currently panics if it is, I need to change the call stack
+/// to return and catch an error
 fn loop_check(&matched: &Matched, limits: &Limits) {
     if matched.len_bytes() == 0 && limits.max == EFFECTIVELY_INFINITE {
         panic!("Appears to be an infinite loop");
     }
 }
     
-
+/// Experimental: I want to use this to simplify the **impl Path ** code. It is begun but not implemented yet
+///
 trait Walker<'a> {
     fn make_report(&'a self) -> Report<'a>;
     fn name_details(&self) -> (&Option<String>, bool);
     fn get_matched(&self) -> Matched;
 }
-/*
-fn handle_name_outside< T: Walker<'a>>(steps: &mut Vec<T>, mut reports: Vec<Report<'a>>) -> Vec<Report<'a>> {
-    let details = steps[0].name_details();
-    if details.1 {
-        let mut matched = steps[0].matched;
-        matched.end = steps.last().unwrap().matched.end;
-        let mut subreports = Vec::new();
-        reports.into_iter().rev().for_each(|mut subs| subreports.append(&mut subs.subreports));
-        reports = vec![Report { matched, name: details.0.clone(), subreports }];
-    };
-    reports
-}
-*/
+
 /// Trace Levels
 /// level 1: just trace phase
 /// level 2: trace start of walks
 /// level 3: trace start and  end of walks
 /// level 4: trace start and  end of walks and each new child in an AND
-
+/// level 10: dump out paths as they are extended
 /// prints message when entering walk (trace level 2)
 fn trace_start_walk<T: Debug>(vec: &[T]) {
     if trace(2) {

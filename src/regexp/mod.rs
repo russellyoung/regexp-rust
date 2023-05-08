@@ -1037,7 +1037,8 @@ impl DefNode {
     fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> { self.node.walk(matched) }
 }
 
-/// **Defs** holds snippet definitions as subtrees which can be inserted into the parse tree when called for
+/// **Defs** holds snippet definitions as subtrees which can be inserted into the parse tree when called for.
+/// They can be defined inline in REs or loaded from an external library
 #[derive(Default,Debug)]
 struct Defs {
     defs: HashMap<String, Node>,
@@ -1090,6 +1091,7 @@ impl Defs {
     }
 
     /// Reads RE snippet definitions from a file and loads them into the table
+    // TODO: check for infinite loops in load
     fn load(&mut self, chars: &mut Peekable) -> Result<Node, Error> {
         let path = Defs::path_from_stream(chars);
         if let Some(')') = chars.skip_whitespace().next() {}
@@ -1174,6 +1176,24 @@ fn char_bytes(string: &str, char_count: usize) -> usize {
     s.len()
 }
 
+/// reads an int from input, consuming characters if one is there, otherwise not changing anything
+fn read_int(chars: &mut Peekable) -> Option<usize> {
+    let mut num: usize = 0;
+    let mut any = false;
+    loop {
+        let digit = chars.next();
+        if digit.is_none() { break; }
+        let digit = digit.unwrap();
+        if !('0'..='9').contains(&digit) {
+            chars.put_back(digit);
+            break;
+        }
+        any = true;
+        num = num*10 + (digit as usize) - ('0' as usize);
+    }
+    if any { Some(num) } else { None }
+}
+
 //////////////////////////////////////////////////////////////////
 //
 // LIMITS
@@ -1219,7 +1239,7 @@ impl Limits {
     fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"?"} else {""})}
 
     /// returns a Limit struct parsed out from point. If none is there returns the default
-    /// Like parse_if() but always returns astruct, using the default if there is none in the string
+    /// Like parse_if() but always returns a struct, using the default if there is none in the string
     fn parse(chars: &mut Peekable) -> Result<Limits, Error> {
         let next = chars.next();
         if next.is_none() { return Ok(Limits::default()); }
@@ -1272,27 +1292,6 @@ impl Limits {
     /// gives the length of the initial walk: MAX for greedy, MIN for lazy
     pub fn initial_walk_limit(&self) -> usize { if self.lazy {self.min} else { self.max}}
 }
-//
-// These functions parse the reps option from the re source
-//
-
-/// reads an int from input, consuming characters if one is there, otherwise not changing anything
-fn read_int(chars: &mut Peekable) -> Option<usize> {
-    let mut num: usize = 0;
-    let mut any = false;
-    loop {
-        let digit = chars.next();
-        if digit.is_none() { break; }
-        let digit = digit.unwrap();
-        if !('0'..='9').contains(&digit) {
-            chars.put_back(digit);
-            break;
-        }
-        any = true;
-        num = num*10 + (digit as usize) - ('0' as usize);
-    }
-    if any { Some(num) } else { None }
-}
 
 //////////////////////////////////////////////////////////////////
 //
@@ -1305,6 +1304,7 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
 
 #[derive(Debug,Clone)]
 pub struct Report<'a> {
+    /// Match information for the step this Report is representing
     matched: Matched<'a>,
     /// The name of the field: if None then the field should not be included in the Report tree, if Some("") it is included but
     /// unnamed, otherwise it is recorded with the given name
@@ -1381,8 +1381,8 @@ impl<'a> Report<'a> {
 
 //////////////////////////////////////////////////////////////////
 //
-/// Peekable
-///
+// Peekable
+//
 /// This is an iterator with added features to make linear parsing of the regexp string easier:
 ///     1) peeking: the next char can be peeked (read without consuming) or returned after being consumed
 ///     2) extra characters can be added to the stream at the end of the buffer (without copying the entire string)
@@ -1473,7 +1473,7 @@ impl<'a> Peekable<'a> {
         self
     }
 
-    /// disploses of the front **num** characters from the stream
+    /// disposes of the front **num** characters from the stream
     pub fn consume(&mut self, num: usize) -> &mut Self { for _i in 0..num { let _ = self.next(); } self}
     
     /// simple to do, and maybe useful for early stages: make sure the parse loop can't get through without burning at least one character
@@ -1507,6 +1507,7 @@ impl<'a> Peekable<'a> {
 }
 
 /// simple struct used to provide control on how errors are displayed
+/// Binding messages with numbers makes testing easier
 #[derive(Debug)]
 pub struct Error {
     pub msg: String,
