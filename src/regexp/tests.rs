@@ -441,8 +441,8 @@ fn alt_or() {
 
 #[test]
 fn alt_def() {
-    find(true, "def(a: 'xyz') w get(a)", "vwxyz", "wxyz");
-    find(true, "def(a: 'xyz') w get(a) get(a)", "vwxyzxyz", "wxyzxyz");
+    find(true, "def(xx: 'xyz') w get(xx)", "vwxyz", "wxyz");
+    find(true, "def(aa: 'xyz') w get(aa) get(aa)", "vwxyzxyz", "wxyzxyz");
     find(true, "use(src/regexp/test.re) a get(a)", "aabcdef", "abcd");
     find(true, "use(src/regexp/test.re) a get(z)+", "aawxyzwx", "awxyzwx");
     find(true, r"def(a: x ){3} get(a) b get(a){4}", "zxxxxbxxxxxx", "xxxbxxxx");

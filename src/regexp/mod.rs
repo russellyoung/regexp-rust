@@ -31,9 +31,12 @@ mod tests;
 use std::str::Chars;
 use crate::{trace, trace_indent, trace_change_indent, trace_set_indent, TAB_SIZE};
 use crate::regexp::walk::Matched;
-use core::fmt::{Debug,};
+use core::fmt::Debug;
 use std::collections::HashMap;
 use home;
+// needed for global Def table
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 /// big number to server as a cap for repetition count
 const EFFECTIVELY_INFINITE: usize = 99999999;
@@ -711,9 +714,8 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
     let mut chars = Peekable::new(&input[(if anchor_front {1} else {0})..]);
     let mut outer_and =
         if alt_parser {
-            let mut defs = Defs::default();
             chars.push_str(" )");
-            AndNode::alt_parse_node(&mut chars, &mut defs)?
+            AndNode::alt_parse_node(&mut chars)?
         } else {
             chars.push_str(r"\)");
             AndNode::parse_node(&mut chars)?
@@ -838,15 +840,15 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<walk::Path<
 ///   - **use(FILE)**: reads definitions in from file
 /// main controller for the tree parse processing, it looks at the next few characters in the pipeline, decides what they are, and
 /// distributes them to the proper XNode constructor function
-fn alt_parse(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
+fn alt_parse(chars: &mut Peekable) -> Result<Node, Error> {
     let mut node = match chars.skip_whitespace().peek_n(4)[..] {
         // define, insert, save, load definitions
-        [Some('d'), Some('e'), Some('f'), Some('(')] => defs.parse(chars.consume(4))?,
-        [Some('g'), Some('e'), Some('t'), Some('(')] => DefNode::alt_parse_node(chars.consume(4), defs)?,
-        [Some('u'), Some('s'), Some('e'), Some('(')] => defs.load(chars.consume(4))?,
+        [Some('d'), Some('e'), Some('f'), Some('(')] => Defs::parse(chars.consume(4))?,
+        [Some('g'), Some('e'), Some('t'), Some('(')] => DefNode::alt_parse_node(chars.consume(4))?,
+        [Some('u'), Some('s'), Some('e'), Some('(')] => Defs::load(chars.consume(4))?,
         // and, or, various text
-        [Some('a'), Some('n'), Some('d'), Some('(')] => AndNode::alt_parse_node(chars.consume(4), defs)?,
-        [Some('o'), Some('r'), Some('('), _] => OrNode::alt_parse_node(chars.consume(3), defs)?,
+        [Some('a'), Some('n'), Some('d'), Some('(')] => AndNode::alt_parse_node(chars.consume(4))?,
+        [Some('o'), Some('r'), Some('('), _] => OrNode::alt_parse_node(chars.consume(3))?,
         [Some('"'), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), '"')?,
         [Some('\''), _, _, _] => CharsNode::alt_parse_node(chars.consume(1), '\'')?,
         [Some('t'), Some('x'), Some('t'), Some('(')] => CharsNode::alt_parse_node(chars.consume(4), ')')?,
@@ -941,7 +943,7 @@ impl RangeNode {
 
 impl AndNode {
     /// Recursively parses an AND node from the front of the Peekable stream
-    fn alt_parse_node(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
+    fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("AND", chars); }
         let mut nodes = Vec::<Node>::new();
         loop {
@@ -953,7 +955,7 @@ impl AndNode {
                 Some('\t') => (),
                 Some(ch) => {
                     chars.put_back(ch);
-                    let node = alt_parse(chars, defs)?;
+                    let node = alt_parse(chars)?;
                     if !node.is_none() {
                         nodes.push(node);
                     }
@@ -968,7 +970,7 @@ impl AndNode {
 
 impl OrNode {
     /// Recursively parses an OR node from the front of the Peekable stream
-    fn alt_parse_node(chars: &mut Peekable, defs: &mut Defs) -> Result<Node, Error> {
+    fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         if trace(2) { trace_enter("OR", chars); }
         let mut nodes = Vec::<Node>::new();
         loop {
@@ -980,7 +982,7 @@ impl OrNode {
                 Some('\t') => (),
                 Some(ch) => {
                     chars.put_back(ch);
-                    let node = alt_parse(chars, defs)?;
+                    let node = alt_parse(chars)?;
                     if !node.is_none() {
                         nodes.push(node);
                     }
@@ -1018,14 +1020,14 @@ impl Debug for DefNode {
 
 impl DefNode {
     /// Provides a snippet definition to splice into the parse tree
-    fn alt_parse_node(chars: &mut Peekable, defs: &Defs) -> Result<Node, Error> { 
+    fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> { 
         if trace(2) { trace_enter("DEF", chars); }
         let name = Defs::name_from_stream(chars, false);
         if name.is_empty() { return Err(Error::make(106, "Missing required name for RE load")); }
         if trace(4) { trace_indent(); println!("defining def {}", name); }
         if let Some(')') = chars.skip_whitespace().next() {}
         else { return Err(Error::make(107, "Bad char in definition name")); }
-        if let Some(root) = defs.get(&name) {
+        if let Some(root) = Defs::get(&name) {
             Ok(Node::Def(DefNode{name, node: Box::new(root), limits: Limits::default(), named: None, name_outside: false}))
         } else { Err(Error::make(108, "Could not find node matching name")) }
     }
@@ -1046,9 +1048,11 @@ struct Defs {
     loaded: Vec<String>,
 }
 
+static DEFS: Lazy<Mutex<Defs>> = Lazy::new(|| Mutex::new(Defs::default()));
+
 impl Defs {
     /// Parses a name and one or more Nodes from the input stream and stores it in the defs table
-    fn parse(&mut self, chars: &mut Peekable) -> Result<Node, Error>{
+    fn parse(chars: &mut Peekable) -> Result<Node, Error>{
         let name = Defs::name_from_stream(chars, false);
         if let Some(':') = chars.next() {}
         else {return Err(Error::make(111, "Missing required name for RE definition")); }
@@ -1060,7 +1064,7 @@ impl Defs {
                 chars.consume(1);
                 break;
             }
-            let node = alt_parse(chars, self)?;
+            let node = alt_parse(chars)?;
             if !node.is_none() {
                 nodes.push(node);
             }
@@ -1079,20 +1083,20 @@ impl Defs {
         if root.named().is_none() { 
             root.set_named(alt_parse_named(chars)?, true);
         }
-        
-        self.defs.insert(name, root);
+
+        DEFS.lock().unwrap().defs.insert(name, root);
         if trace(2) { trace_change_indent(-1); trace_indent(); println!("finished definition"); }
         Ok(Node::None)
     }
 
     /// Fetches an already-defined function to be insered into the parse tree
-    fn get(&self, name: &str) -> Option<Node> {
-        self.defs.get(name).cloned()
+    fn get(name: &str) -> Option<Node> {
+        DEFS.lock().unwrap().defs.get(name).cloned()
     }
 
     /// Reads RE snippet definitions from a file and loads them into the table
     // TODO: check for infinite loops in load
-    fn load(&mut self, chars: &mut Peekable) -> Result<Node, Error> {
+    fn load(chars: &mut Peekable) -> Result<Node, Error> {
         let path = Defs::path_from_stream(chars);
         if let Some(')') = chars.skip_whitespace().next() {}
         else {return Err(Error::make(113, "Malformed \"use\" statement"));}
@@ -1104,7 +1108,7 @@ impl Defs {
                 let mut def_chars = Peekable::new(&string);
                 while def_chars.skip_whitespace().peek().is_some() {
                     if def_chars.peek() != Some('#'){
-                        if let Node::Def(def_node) = alt_parse(&mut def_chars, self)? {
+                        if let Node::Def(def_node) = alt_parse(&mut def_chars)? {
                             if trace(2) { trace_indent(); println!("Read definition of {} from {}", def_node.name, path); }
                         }
                     } else {
