@@ -29,25 +29,15 @@ a few week's rest I decided to give it a go.
 
 ## _RELEASE!_
 
-**ALMOST DONE!**
+**DONE!**
 
-This is almost finished. There are several TODOs to implement, but
-they are for style points, not functionality - wit one exceptiomn,
-lazy evaluation of comlex **OR** nodes, which is marked with a
-TODO. This will be highest priority when I get back to this (which
-will be a few weeks at least - lots of things going on here in the
-next couple months)
+It is written and seems to be working. Besides standard regular
+expressions I designed a new regular expression format that is both
+more general and simpler than "regular" regular expressions. This was
+done mainly as an exercise - I don't expect my new format to sweep the
+internet, but who knows, I may adopt it myself. It is described below.
 
-
-The back-off bugs have been fixed, and the alternative parser seems to
-be working. I'm pretty happy with it.
-
-What remains: Not much. Mainly a few things marked wih TODO that I
-want to fix, especially because some of them have to do with
-lifetimes, and I do want to understand better what is happening. There
-are also a few mores bells and/or whistles I might want to add, and
-some interactive functionality I originally designed in is still not
-done. But basically, this is it.
+## _PROJECT SUMMARY_
 
 Writing it has been moderately successful. I am a lot more comfortable
 with Rust than I was. Rewriting the code about 10 times as I
@@ -73,29 +63,6 @@ And googling documents to try to understand blockig problems I also
 found that there is a lot more going on that I don't know about.
 Despite its surface similarity to other languages, 
 
-### _TODO_
-
-The TODO list is amost gone. All that remains is the biggest and most
-important one of all, refactoring to combine the Nodes and Steps into
-a single superclass/trait that would eliminate the need for duplicate
-code, switching methods in Path, and the distinctions between the
-different Nodes and Steps.
-
-And, if it were a real project, there probably should be more tests,
-for Report and searching, but this is OK for this type of project.
-
-
-### _Final comments_
-
-In any case, I'm ready to take a break from Rust. 2 programs, each one
-rewritten probably 10 times, is a lot of work and a lot of time, and I
-need to get back to other things. Still, it has been an eye-opening
-experience, and when I get back to the US and look for work I can at
-least consider positions that use Rust.
-
-
-Even though it's almost done, comments are still welcomed and
-encouraged. I promise to think about everything that comes in.
 
 ## _Alternate Parser_
 
@@ -117,8 +84,9 @@ require a new front end, if the foundations and walk logic were
 flexible enough to provide common tools, and (with a little work) they
 turned out to have them.
 
-So, here is an intro to the alternate regular expressions. It provides
-the following features:
+So, here is a very brief intro to the alternate regular
+expressions. If anyone cares to ask I can write up a better one. It
+provides the following features:
 
  - Whitespace between units are ignored. This means indenting and new
    lines can be used to help make the meaning clearer
@@ -127,11 +95,10 @@ the following features:
    wrap them in **AND** nodes. They can also contain repetition counts
    internally, though these cannot have names assigned.
  - String units contain characters, special characters, and
-   ranges. They can be writen in several ways: 
+   ranges. They can be written in several ways: 
    - **"..."** or **'...'** a unit surrounded with either single or
    double quotes is a string unit. This way inserting one of the quote
-   characters is easier. Or, quote characters can be escaped using
-   '\'.
+   characters is easier. Or, quote characters can be escaped using '\'.
    - **txt(...)** Similar to the syntax for **and()** and **or()**,
      the **txt(...)** function can be used to make a string unit.
    - Finally, characters without any unit indicator are interpreted as
@@ -139,15 +106,15 @@ the following features:
      drawbacks: no whitespace characters can be embedded, unless
      preceded by '\', and care must be taken that there is a space
      afterward to signify the termination. **or(abc def)** will not
-     find the string "abc" **pr** "def", it will report an error
+     find the string "abc" **or** "def", it will report an error
      because the closing ')' of the **or()** will be interpreted as
      part of the string "def)". Also, using this implied notation, it
      is not possible to assign names or repeat counts to string
-     units. For thatthe units must be enclosed.
+     units. For that the units must be enclosed.
  - **AND** nodes are created by enclosing them using the function
    notation **and(...)**. Inside the **AND** any units can be
-   included. There is no comma or other punctioation separating two
-   AND children.
+   included. There is no comma or other punctioation required to
+   separating two **AND** children.
  - **OR** nodes, like **AND** nodes, are written explicitly using the
    enclosure **or(...)**. This is a big win over traditional regular
    expressions that use "\|" as an infix function indicator.
@@ -171,3 +138,15 @@ the following features:
    also be included in files and read in by **use(...)**, allowing for
    a library of common custom pieces.
  
+### _Final comments_
+
+In any case, I'm ready to take a break from Rust. 2 programs, each one
+rewritten probably 10 times, is a lot of work and a lot of time, and I
+need to get back to other things. Still, it has been an eye-opening
+experience, and when I get back to the US and look for work I can at
+least consider positions that use Rust.
+
+
+Even though it's almost done, comments are still welcomed and
+encouraged. I promise to think about everything that comes in.
+

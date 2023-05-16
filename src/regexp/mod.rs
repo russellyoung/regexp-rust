@@ -164,13 +164,13 @@ impl Node {
         };
     }
     
-    fn substitute_defs(&mut self) -> Result<(), Error> {
+    fn substitute_defs<'a>(&'a mut self, nested: &mut Vec<&'a str>) -> Result<(), Error> {
         match self {
             Node::And(a) => {
-                for x in &mut a.nodes[..] { x.substitute_defs()?; }
+                for x in &mut a.nodes[..] { x.substitute_defs(nested)?; }
             },
             Node::Or(a) => {
-                for x in &mut a.nodes[..] { x.substitute_defs()?; }
+                for x in &mut a.nodes[..] { x.substitute_defs(nested)?; }
             },
             Node::Def(def_node) => {
                 if def_node.node.is_none() {
@@ -180,7 +180,12 @@ impl Node {
                         def_node.node = Box::new(node); }
                     else { return Err(Error::make(108, format!("No definition for DefNode {}", def_node.name).as_str())) }
                 }
-                def_node.node.substitute_defs()?;
+                if nested.contains(&def_node.name.as_str()) {
+                    return  Err(Error::make(109, format!("{} is included recursively", def_node.name).as_str()))
+                }
+                nested.push(def_node.name.as_str());
+                def_node.node.substitute_defs(nested)?;
+                nested.pop();
             },
             _ => (),
         }
@@ -752,7 +757,8 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
         outer_and.set_named(Some("".to_string()), false);
         if chars.next().is_some() { return Err(Error::make(6, "Extra characters after parse completed (should not happen)")); }
     }
-    outer_and.substitute_defs()?;
+    let mut nested: Vec<&str> = Vec::new();
+    outer_and.substitute_defs(&mut nested)?;
     Ok(outer_and)
 }
 
@@ -1069,8 +1075,6 @@ impl DefNode {
 #[derive(Default,Debug)]
 struct Defs {
     defs: HashMap<String, Node>,
-    load: Vec<String>,
-    loaded: Vec<String>,
 }
 
 static DEFS: Lazy<Mutex<Defs>> = Lazy::new(|| Mutex::new(Defs::default()));
@@ -1081,6 +1085,7 @@ impl Defs {
         let name = Defs::name_from_stream(chars, false);
         if let Some(':') = chars.next() {}
         else {return Err(Error::make(111, "Missing required name for RE definition")); }
+        if trace(1) && DEFS.lock().unwrap().defs.get(&name).is_some() { trace_indent(); println!("Overriding definition of {}", name); }
         if trace(2) { trace_indent(); println!("reading definition of {}", name); trace_change_indent(1); }
         let mut nodes = Vec::<Node>::new();
         loop {

@@ -452,7 +452,7 @@ fn alt_err() {
     e_check(true, r"get() ", 106);
     e_check(true, r"get(a() ", 107);
     e_check(true, r"get(a) ", 108);
-    // there is no 109
+    e_check(true, r"def(snippet_a: aa get(snippet_b)zz ) def(snippet_b: bb get(snippet_a) yy ) abcd get(snippet_a) wxyz ", 109);
     e_check(true, r"and(asd )<xy ", 110);
     e_check(true, r"def(asd)", 111);
     e_check(true, r"def(asd:)", 112);
