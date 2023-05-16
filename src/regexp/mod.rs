@@ -37,6 +37,7 @@ use home;
 // needed for global Def table
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
+//use std::cell::RefCell;
 
 /// big number to server as a cap for repetition count
 const EFFECTIVELY_INFINITE: usize = 99999999;
@@ -98,14 +99,14 @@ impl Clone for Node {
 }    
 impl Node {
     /// Distributes a walk request to the proper XXXNode struct
-    fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> {
+    fn walk<'a>(&'a self, matched: Matched<'a>) -> Result<walk::Path<'a>, Error> {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, matched),
             Node::Special(special_node) => walk::SpecialStep::walk(special_node, matched),
             Node::Range(range_node) => walk::RangeStep::walk(range_node, matched),
             Node::And(and_node) => walk::AndStep::walk(and_node, matched),
             Node::Or(or_node) => walk::OrStep::walk(or_node, matched),
-            Node::Def(def_node) => def_node.node.walk(matched),
+            Node::Def(def_node) => { def_node.node.walk(matched) }
             Node::None => panic!("NONE node should not be in final tree")
         }
     }
@@ -136,7 +137,7 @@ impl Node {
             Node::None => panic!("No name for None node"),
         };
     }
-
+    
     /// Gets the **self.named** value from the wrapped XXXNode
     fn named(&self) -> &Option<String> {
         match self {
@@ -145,11 +146,11 @@ impl Node {
             Node::Range(a) => &a.named,
             Node::And(a) => &a.named,
             Node::Or(a) => &a.named,
-            Node::Def(a) => a.node.named(),
+            Node::Def(a) => &a.named,
             Node::None => panic!("No name for None node"),
         }
     }
-
+    
     /// Sets the **self.limits** value for the wrapped XXXNode
     fn set_limits(&mut self, limits: Limits) {
         match self {
@@ -158,11 +159,34 @@ impl Node {
             Node::Range(a) => a.limits = limits,
             Node::And(a) => a.limits = limits,
             Node::Or(a) => a.limits = limits,
-            Node::Def(a) => a.node.set_limits(limits),
+            Node::Def(a) => a.limits = limits,
             Node::None => panic!("No limits for None node"),
         };
     }
-
+    
+    fn substitute_defs(&mut self) -> Result<(), Error> {
+        match self {
+            Node::And(a) => {
+                for x in &mut a.nodes[..] { x.substitute_defs()?; }
+            },
+            Node::Or(a) => {
+                for x in &mut a.nodes[..] { x.substitute_defs()?; }
+            },
+            Node::Def(def_node) => {
+                if def_node.node.is_none() {
+                    if let Some(mut node) = Defs::get(def_node.name.as_str()) {
+                        if def_node.limits != Limits::default() { node.set_limits(def_node.limits); }
+                        if def_node.named.is_some() { node.set_named(def_node.named.clone(), def_node.name_outside); }
+                        def_node.node = Box::new(node); }
+                    else { return Err(Error::make(108, format!("No definition for DefNode {}", def_node.name).as_str())) }
+                }
+                def_node.node.substitute_defs()?;
+            },
+            _ => (),
+        }
+        Ok(())
+    }
+    
     /// checks whether the node is the special Node::None type, used to initialize structures and in case of errors. 
     fn is_none(&self) -> bool { *self == Node::None }
 
@@ -303,7 +327,7 @@ pub struct OrNode {
 pub struct DefNode {
     /// Name of the snippet
     name: String,
-    /// Subtree giving the snippet
+//    /// Subtree giving the snippet
     node: Box<Node>,
     limits: Limits,
     named: Option<String>,
@@ -330,7 +354,7 @@ impl Clone for OrNode {
 }
 impl Clone for DefNode {
     fn clone(&self) -> DefNode {
-        DefNode{node: self.node.clone(), name: self.name.clone(), named: self.named.clone(), limits: self.limits, name_outside: false, }
+        DefNode{name: self.name.clone(), node: self.node.clone(), named: self.named.clone(), limits: self.limits, name_outside: false, }
     }
 }
 
@@ -728,6 +752,7 @@ pub fn parse_tree(input: &str, alt_parser: bool ) -> Result<Node, Error> {
         outer_and.set_named(Some("".to_string()), false);
         if chars.next().is_some() { return Err(Error::make(6, "Extra characters after parse completed (should not happen)")); }
     }
+    outer_and.substitute_defs()?;
     Ok(outer_and)
 }
 
@@ -783,7 +808,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<walk::Path<
     loop {
         if trace(1) {println!("\n==== WALK \"{}\" ====", &text[start_pos..])}
         let matched = Matched { full_string: text, start: start_pos, end: start_pos, char_start };
-        let path = tree.walk(matched);
+        let path = tree.walk(matched)?;
         if path.len() > 1 {
             if trace(1) { println!("--- Search succeeded ---") };
             return Ok(Some(path));
@@ -1014,7 +1039,7 @@ impl Debug for DefNode {
         let name = { if let Some(name) = &self.named { format!("<{}>", name)} else {"".to_string()}};
         let limits_str = self.limits.simple_display();
         let name_limits = if self.name_outside {(&limits_str, &name)} else {(&name, &limits_str)};
-        write!(f, "DefNode{}{}{} ", self.name, name_limits.0, name_limits.1  )
+        write!(f, "DefNode '{}'{}{} ", self.name, name_limits.0, name_limits.1  )
     }
 }
 
@@ -1027,16 +1052,16 @@ impl DefNode {
         if trace(4) { trace_indent(); println!("defining def {}", name); }
         if let Some(')') = chars.skip_whitespace().next() {}
         else { return Err(Error::make(107, "Bad char in definition name")); }
-        if let Some(root) = Defs::get(&name) {
-            Ok(Node::Def(DefNode{name, node: Box::new(root), limits: Limits::default(), named: None, name_outside: false}))
-        } else { Err(Error::make(108, "Could not find node matching name")) }
+        Ok(Node::Def(DefNode{name, node: Box::new(Node::None), limits: Limits::default(), named: None, name_outside: false}))
     }
     fn desc(&self, indent: usize) {
         println!("{0:1$}{2:?}", "", indent, self);
-        self.node.desc(indent + TAB_SIZE);
+        if let Some(node) = &Defs::get(self.name.as_str()) {
+            node.desc(indent + TAB_SIZE);
+        } else {
+            println!("{0:1$}(no definition yet)", "", indent + 4);
+        }
     }
-
-    fn walk<'a>(&'a self, matched: Matched<'a>) -> walk::Path<'a> { self.node.walk(matched) }
 }
 
 /// **Defs** holds snippet definitions as subtrees which can be inserted into the parse tree when called for.

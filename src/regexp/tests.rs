@@ -383,12 +383,6 @@ fn e_check(alt: bool, re: &str, ecode: usize) {
     }
 }
 #[test]
-#[should_panic]
-fn infinite_loop() {
-    find(true, r"and('x'*)*", "abcd", "abccc");
-}
-
-#[test]
 fn errors() {
     e_check(false, r"abc\(de", 1);
     e_check(false, r"\(?<asd\)", 2);
@@ -465,6 +459,17 @@ fn alt_err() {
     e_check(true, r"use(asd()", 113);
     e_check(true, r"use(no-such-file)", 114);
 }
+#[test]
+fn runtime_error() {
+    // infinite loop test
+    if let Ok(tree) = parse_tree(r"and('x'*)*", true) {
+        match walk_tree(&tree, "abccc") {
+            Err(e) if e.code == 200 => (),
+            _ => panic!("Expected infinite loop, didn't get it"),
+        }
+    } else { panic!("Parse failed for infinite loop test"); }
+}
+
 
 #[test]
 // check that X*<NAME> and X<NAME>* behave right

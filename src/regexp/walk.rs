@@ -148,7 +148,7 @@ impl<'a> Path<'a> {
     ///   going to the next option
     /// - back off the last step, check if that still meets the requirements. For greedy evaluation this means popping
     ///   off a step from the Path, for lazy eval it means adding a new step
-    fn back_off(&mut self) -> bool {
+    fn back_off(&mut self) -> Result<bool, Error> {
         if trace(6) { trace_change_indent(1); }
         let limits = self.limits();
         let mut ret = false;
@@ -183,9 +183,9 @@ impl<'a> Path<'a> {
                 },
                 Path::And(steps) => {
                     let len0 = steps.len();
-                    if steps[len0 - 1].back_off() { ret = true; }
+                    if steps[len0 - 1].back_off()? { ret = true; }
                     else if limits.check(steps.len() + 1) == 0 {
-                        if let Some(next_step) = steps[len0 - 1].step() {
+                        if let Some(next_step) = steps[len0 - 1].step()? {
                             steps.push(next_step);
                             ret = true;
                         } 
@@ -194,9 +194,9 @@ impl<'a> Path<'a> {
                 },
                 Path::Or(steps) => {
                     let len0 = steps.len();
-                    if steps[len0 - 1].back_off() { ret = true; }
+                    if steps[len0 - 1].back_off()? { ret = true; }
                     else if limits.check(steps.len() + 1) == 0 {
-                        if let Some(next_step) = steps[len0 - 1].step() {
+                        if let Some(next_step) = steps[len0 - 1].step()? {
                             steps.push(next_step);
                             ret = true;
                         } 
@@ -225,7 +225,7 @@ impl<'a> Path<'a> {
                 Path::And(steps) => {
                     let mut last_step = steps.pop().unwrap();
                     let len0 = steps.len();
-                    if last_step.back_off() {
+                    if last_step.back_off()? {
                         ret = true;
                         steps.push(last_step);
                     } else {
@@ -236,7 +236,7 @@ impl<'a> Path<'a> {
                 Path::Or(steps) => {
                     let len0 = steps.len();
                     let mut last_step = steps.pop().unwrap();
-                    if last_step.back_off() {
+                    if last_step.back_off()? {
                         ret = true;
                         steps.push(last_step);
                     } else {
@@ -248,7 +248,7 @@ impl<'a> Path<'a> {
             }
         }
         if trace(6) { trace_change_indent(-1); }
-        ret
+        Ok(ret)
     }
 
     /// recursively creates **Report** objects for a path. For the branches (And and Or) this means recording itself
@@ -362,10 +362,10 @@ impl<'a> Path<'a> {
 // I assume the caller knows what he is doing
 /// Call to check whether the parser is in an infinite loop. Currently panics if it is, I need to change the call stack
 /// to return and catch an error
-fn loop_check(&matched: &Matched, limits: &Limits) {
+fn loop_check(&matched: &Matched, limits: &Limits) -> Result<(), Error> {
     if matched.len_bytes() == 0 && limits.max == EFFECTIVELY_INFINITE {
-        panic!("Appears to be an infinite loop");
-    }
+        Err(Error::make(200, "Appears to be an infinite loop"))
+    } else { Ok(()) }
 }
     
 /// Experimental: I want to use this to simplify the **impl Path ** code. It is begun but not implemented yet
@@ -519,7 +519,7 @@ impl<'a> Walker<'a> for CharsStep<'a> {
 // Any way to make walk() generic?
 impl<'a> CharsStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a CharsNode, matched: Matched<'a>) -> Path<'a> {
+    pub fn walk(node: &'a CharsNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
         let mut steps = vec![CharsStep {node, matched}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
@@ -531,7 +531,7 @@ impl<'a> CharsStep<'a> {
                 None => break,
             }
         }
-        trace_end_walk(Path::Chars(steps))
+        Ok(trace_end_walk(Path::Chars(steps)))
     }
 
     // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
@@ -569,7 +569,7 @@ impl<'a> Walker<'a> for SpecialStep<'a> {
 
 impl<'a> SpecialStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a SpecialNode, matched: Matched<'a>) -> Path<'a> {
+    pub fn walk(node: &'a SpecialNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
         let mut steps = vec![SpecialStep {node, matched}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
@@ -581,7 +581,7 @@ impl<'a> SpecialStep<'a> {
                 None => break,
             }
         }
-        trace_end_walk(Path::Special(steps))
+        Ok(trace_end_walk(Path::Special(steps)))
     }
 
     // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
@@ -620,7 +620,7 @@ impl<'a> Walker<'a> for RangeStep<'a> {
 
 impl<'a> RangeStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a RangeNode, matched: Matched<'a>) -> Path<'a> {
+    pub fn walk(node: &'a RangeNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
         let mut steps = vec![RangeStep {node, matched}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
@@ -632,7 +632,7 @@ impl<'a> RangeStep<'a> {
                 None => break,
             }
         }
-        trace_end_walk(Path::Range(steps))
+        Ok(trace_end_walk(Path::Range(steps)))
     }
 
     // this 'a -------------------------V caused me real problems, and needed help from Stackoverflow to sort out
@@ -676,13 +676,13 @@ impl<'a> Walker<'a> for AndStep<'a> {
 
 impl<'a> AndStep<'a> {
     /// start a Path using an And node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a AndNode, matched: Matched<'a>) -> Path<'a> {
+    pub fn walk(node: &'a AndNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
         let mut steps = vec![AndStep {node, matched, child_paths: Vec::<Path<'a>>::new()}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
             let len = steps.len();
-            if  len % 30 == 29 { loop_check(&steps.last().unwrap().matched, &node.limits); }
-            match steps[len - 1].step() {
+            if  len % 30 == 29 { loop_check(&steps.last().unwrap().matched, &node.limits)?; }
+            match steps[len - 1].step()? {
                 Some(s) => {
                     trace_pushing::<AndStep>(&s, steps.len());
                     steps.push(s);
@@ -690,11 +690,11 @@ impl<'a> AndStep<'a> {
                 None => { break; }
             }
         }
-        trace_end_walk(Path::And(steps))
+        Ok(trace_end_walk(Path::And(steps)))
     }
 
     /// try to take a single step matching an And node
-    fn step(&mut self) -> Option<AndStep<'a>> {
+    fn step(&mut self) -> Result<Option<AndStep<'a>>, Error> {
         let mut step = AndStep {node: self.node,
                                 matched: self.matched.next(0),
                                 child_paths: Vec::<Path<'a>>::new(),
@@ -704,19 +704,19 @@ impl<'a> AndStep<'a> {
             if child_len == step.node.nodes.len() {
                 break;    // all child nodes are satisfied, return success
             }
-            let child_path = step.node.nodes[child_len].walk(step.matched.next(0));
+            let child_path = step.node.nodes[child_len].walk(step.matched.next(0))?;
             if child_path.limits().check(child_path.len()) == 0 {
                 step.child_paths.push(child_path);
                 // This could be done by removing the "else" below, but putting it here makes the trace up-to-date
                 step.matched.set_end(step.child_paths.last().unwrap().end());
                 trace_new_step(&step);
-            } else if !step.back_off() {
-                return None;
+            } else if !step.back_off()? {
+                return Ok(None);
             } else {
                 step.matched.set_end(step.child_paths.last().unwrap().end());
             }
         }
-        Some(step)
+        Ok(Some(step))
     }
 
     /// Back off a step after a failed match. It will back off repetitions until an untried one is found,
@@ -726,7 +726,7 @@ impl<'a> AndStep<'a> {
     /// **back_off()** only touches the path - that is, the Vec(XXXStep). It can change Steps higher in the hierarchy
     /// or pop off the last step, but cannot change anything inside any of the *Step**s. **XXXStep::back_off()** ,
     /// on the other hand, should only change things within the current Step, that is 
-    fn back_off(&mut self) -> bool {
+    fn back_off(&mut self) -> Result<bool, Error> {
         if trace(6) {
             trace_indent(); println!("back off Node: {:?}", self);
             trace_change_indent(1);
@@ -742,7 +742,7 @@ impl<'a> AndStep<'a> {
             loop {
                 // This pops off the last child path. If the Path backs off it is restored, if not then it is already removed
                 if let Some(mut last_path) = self.child_paths.pop() {
-                    if last_path.back_off() {
+                    if last_path.back_off()? {
                         self.child_paths.push(last_path);
                         break;
                     }
@@ -761,7 +761,7 @@ impl<'a> AndStep<'a> {
             trace_change_indent(-1);
             trace_indent(); println!("back off Node: {}: {:?}", ret, self);
         }
-        ret
+        Ok(ret)
     }
 /*    
     /// Compiles a **Report** object from this path and its children after a successful search
@@ -799,22 +799,22 @@ impl<'a> Walker<'a> for OrStep<'a> {
 impl<'a> OrStep<'a> {
     
     /// start a Path using an And node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a OrNode, matched: Matched<'a>) -> Path<'a> {
+    pub fn walk(node: &'a OrNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
         let mut steps = vec![OrStep {node, matched, child_path: Box::new(Path::None), which: 0}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
-            if let Some(s) = steps.last().unwrap().step() {
+            if let Some(s) = steps.last().unwrap().step()? {
                 let len = steps.len();
-                if  len % 30 == 29 { loop_check(&s.matched, &node.limits); }
+                if  len % 30 == 29 { loop_check(&s.matched, &node.limits)?; }
                 trace_pushing::<OrStep>(&s, steps.len());
                 steps.push(s);
             } else { break; }
         }
-        trace_end_walk(Path::Or(steps))
+        Ok(trace_end_walk(Path::Or(steps)))
     }
     
     /// try to take a single step matching an Or node
-    fn step(&self) -> Option<OrStep<'a>> {
+    fn step(&self) -> Result<Option<OrStep<'a>>, Error> {
         let mut step = OrStep {node: self.node,
                                matched: self.matched.next(0),
                                which: 0, 
@@ -823,25 +823,25 @@ impl<'a> OrStep<'a> {
         loop {
             if step.which == step.node.nodes.len() {
                 if trace(4) { trace_indent(); println!("OR step failed (exhausted)"); }
-                return None;
+                return Ok(None);
             }
-            step.child_path = Box::new(step.node.nodes[step.which].walk(self.matched.next(0)));
+            step.child_path = Box::new(step.node.nodes[step.which].walk(self.matched.next(0))?);
             if step.child_path.limits().check(step.child_path.len()) == 0 { break; }
             step.which += 1;
         }
         if trace(6) { trace_indent(); println!("    new OR step: {:?}", step); }
         step.matched.set_end(step.child_path.end());
-        Some(step)
+        Ok(Some(step))
     }
 
-    fn back_off(&mut self) -> bool {
+    fn back_off(&mut self) -> Result<bool, Error> {
         if trace(6) {
             trace_indent(); println!("back off Node: {:?}", self);
             trace_change_indent(1);
         }
         let ret;
         loop {
-            if self.child_path.back_off() {
+            if self.child_path.back_off()? {
                 ret = "true: child backed off";
                 break;
             }
@@ -852,7 +852,7 @@ impl<'a> OrStep<'a> {
                 ret = "false: exhausted";
                 break;
             }
-            self.child_path = Box::new(self.node.nodes[self.which].walk(self.matched));
+            self.child_path = Box::new(self.node.nodes[self.which].walk(self.matched)?);
             if self.child_path.limits().check(self.child_path.len()) == 0 {
                 ret = "true: next option"; 
                 break;
@@ -862,7 +862,7 @@ impl<'a> OrStep<'a> {
         if !self.child_path.is_empty() {
             self.matched.set_end(self.child_path.end());
         }
-        ret.starts_with("true")
+        Ok(ret.starts_with("true"))
     }
 /*
     /// Compiles a **Report** object from this path and its child after a successful search
