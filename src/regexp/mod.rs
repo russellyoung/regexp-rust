@@ -163,7 +163,8 @@ impl Node {
             Node::None => panic!("No limits for None node"),
         };
     }
-    
+
+    /// Fills in the definitions from the Defs hash table
     fn substitute_defs<'a>(&'a mut self, nested: &mut Vec<&'a str>) -> Result<(), Error> {
         match self {
             Node::And(a) => {
@@ -385,7 +386,7 @@ impl Debug for CharsNode {
     
 impl CharsNode {
     /// Traditional parser for Character units, strings of regular
-    /// characters that must match exactly. It is made a littl
+    /// characters that must match exactly. It is made a little
     /// trickier because characters do not "clump" when attached to
     /// repetitions or OR nodes, so in some cases a **CharsNode** must be split.
     fn parse_node(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
@@ -428,7 +429,8 @@ impl CharsNode {
         if string.starts_with(self.string.as_str()) { Some(self.string.len()) }
         else { None }
     }
-    
+
+    /// Used to prety-print, including proper indentation
     fn desc(&self, indent: usize) { println!("{0:1$}{2:?}", "", indent, self); }
 
     /// maps escape characters to the actual code they represent
@@ -510,6 +512,7 @@ impl SpecialNode {
         } else { sp_ch == '$' }
     }
     
+    /// Used to prety-print, including proper indentation
     fn desc(&self, indent: usize) { println!("{0:1$}{2:?}", "", indent, self); }
 }
 
@@ -521,6 +524,7 @@ impl SpecialNode {
 pub struct Range { pub from: char, pub to: char}
 
 impl Range {
+    /// Checks if the Range includes the given character
     fn contains(&self, ch: char) -> bool { self.from <= ch && ch <= self.to }
 }
 impl std::fmt::Display for Range {
@@ -592,6 +596,7 @@ impl RangeNode {
         } else { None }
     }
 
+    /// Used to prety-print, including proper indentation
     fn desc(&self, indent: usize) { println!("{0:1$}{2:?}", "", indent, self); }
 }
 
@@ -677,6 +682,7 @@ impl AndNode {
         else { panic!("trying to get AndNode from wrong type") }
     }
 
+    /// Used to prety-print, including proper indentation
     fn desc(&self, indent: usize) {
         println!("{0:1$}{2:?}", "", indent, self);
         for i in 0..self.nodes.len() {
@@ -712,6 +718,7 @@ impl OrNode {
         else { panic!("trying to get OrNode from wrong type") }
     }
     
+    /// Used to prety-print, including proper indentation
     fn desc(&self, indent: usize) {
         println!("{0:1$}{2:?}", "", indent, self);
         for i in 0..self.nodes.len() {
@@ -1060,6 +1067,7 @@ impl DefNode {
         else { return Err(Error::make(107, "Bad char in definition name")); }
         Ok(Node::Def(DefNode{name, node: Box::new(Node::None), limits: Limits::default(), named: None, name_outside: false}))
     }
+    /// Used to prety-print, including proper indentation
     fn desc(&self, indent: usize) {
         println!("{0:1$}{2:?}", "", indent, self);
         if let Some(node) = &Defs::get(self.name.as_str()) {
@@ -1483,6 +1491,7 @@ impl<'a> Peekable<'a> {
         self.peeked.insert(0, ch);
     }
 
+    /// Returns a string to the queue, shortcut for doing it char-by-char
     pub fn put_back_str(&mut self, string: &str) {
         self.progress_check -= 1;
         for ch in string.chars().rev() {
@@ -1542,6 +1551,7 @@ impl<'a> Peekable<'a> {
 
 /// simple struct used to provide control on how errors are displayed
 /// Binding messages with numbers makes testing easier
+/// TODO: add macro interface to make inserting data in messages easier?
 #[derive(Debug)]
 pub struct Error {
     pub msg: String,

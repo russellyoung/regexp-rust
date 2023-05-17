@@ -405,13 +405,14 @@ fn trace_end_walk(path: Path) -> Path {
     path
 }
 
-/// prints message when taking a new step during a walk (trace level 4)
+/// prints message when adding a Step to a Path (trace level 4)
 fn trace_pushing<T: Debug>(obj: &T, len: usize) {
     if trace(4) {
         trace_indent();
         println!("Pushing {:?} rep {}", obj, len - 1);
     }
 }
+/// prints message when taking a new step during a walk (trace level 4)
 fn trace_new_step(and_step: &AndStep) {
     if trace(5) {
         trace_indent();
@@ -544,13 +545,6 @@ impl<'a> CharsStep<'a> {
             Some(step)
         } else { None }
     }
-/*
-    fn make_report(&self) -> Report<'a> {
-        Report {matched: self.matched,
-                 name: self.node.named.clone(),
-                 subreports: Vec::<Report<'a>>::new()}
-    }
-*/    
     fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self);
     }
@@ -594,14 +588,7 @@ impl<'a> SpecialStep<'a> {
             Some(step)
         } else { None }
     }
-/*
-    /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report<'a> {
-        Report {matched: self.matched,
-                name: self.node.named.clone(),
-                subreports: Vec::<Report<'a>>::new()}
-    }
-*/
+
     fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?} ", "", 4*indent, rank, self,);
     }
@@ -645,14 +632,7 @@ impl<'a> RangeStep<'a> {
             Some(step)
         } else { None }
     }
-/*
-    /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&self) -> Report<'a> {
-        Report {matched: self.matched,
-                name: self.node.named.clone(),
-                subreports: Vec::<Report<'a>>::new()}
-}
-    */
+
     fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self);
     }
@@ -763,19 +743,7 @@ impl<'a> AndStep<'a> {
         }
         Ok(ret)
     }
-/*    
-    /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&'a self) -> Report<'a> {
-        let mut reports = Vec::<Report<'a>>::new();
-        for p in &self.child_paths {
-            let mut subreports = p.gather_reports();
-            reports.append(&mut subreports);
-        }
-        Report { matched: self.matched,
-                 name: self.node.named.clone(),
-                 subreports: reports}
-    }
-*/
+
     pub fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?}", "", 4*indent, rank, self, );
         self.child_paths.iter().for_each(|x| x.dump(indent + 1));
@@ -864,15 +832,7 @@ impl<'a> OrStep<'a> {
         }
         Ok(ret.starts_with("true"))
     }
-/*
-    /// Compiles a **Report** object from this path and its child after a successful search
-    fn make_report(&self) -> Report {
-        let subreports = self.child_path.gather_reports();
-        Report { matched: self.matched,
-                 name: self.node.named.clone(),
-                 subreports}
-    }
-*/
+
     pub fn dump(&self, rank: usize, indent: usize) {
         trace_indent(); println!("|{0:1$}{2}: {3:?} {4} of {5}", "", 4*indent, rank, self, self.which, self.node.nodes.len());
         self.child_path.dump(indent + 1);
