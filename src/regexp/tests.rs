@@ -1,5 +1,10 @@
 use crate::regexp::*;
 use std::io::Write;
+use std::sync::Mutex;
+
+// This is needed because the input string is stored statically, and so the test breaks if it is run multi-thread.
+pub static LOCK: Mutex<usize> = Mutex::new(0);
+
 //
 // Initial tests are basic sanity tests for the tree parser. They are relatively simple because the
 // search tests (TODO) will provide more complete testing. These are intended mainly as a sanity check
@@ -8,6 +13,8 @@ use std::io::Write;
 
 #[test]
 fn peekable() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     let mut chars = Peekable::new("abcde");
     chars.push('z');
     assert_eq!(Some('a'), chars.next());
@@ -39,6 +46,8 @@ fn peekable() {
 //
 #[test]
 fn limits_test() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     let limits_string = " ? * + {2} {3,5} {6,} ?? *? +? {2}? {3,5}? {6,}? ";
     let data: [(usize, usize, bool); 13] = [(1, 1, false),
                                             (0, 1, false),
@@ -103,6 +112,8 @@ impl Node {
 //
 #[test]
 fn test_string_simple() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     let mut node = make_root(1, 1, false);
     node.push(make_chars_string("abcd"));
     assert_eq!(node, parse_tree("abcd", false).unwrap());
@@ -110,6 +121,8 @@ fn test_string_simple() {
 
 #[test]
 fn test_string_embedded_reps_greedy() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     let mut node = make_root(1, 1, false);
     node.push(make_chars_string("ab"));
     node.push(make_chars_single('c', 0, 1, false));
@@ -122,6 +135,8 @@ fn test_string_embedded_reps_greedy() {
               
 #[test]
 fn test_string_embedded_reps_lazy() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     let mut node = make_root(1, 1, false);
     node.push(make_chars_string("ab"));
     node.push(make_chars_single('c', 0, 1, true));
@@ -135,6 +150,8 @@ fn test_string_embedded_reps_lazy() {
 
 #[test]
 fn or_with_chars_bug() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     let mut node = make_root(1, 1, false);
     node.push(make_chars_string("ab"));
     let mut or_node = make_or();
@@ -167,6 +184,8 @@ fn not_find<'a>(alt: bool, re: &'a str, text: &'a str) {
 //
 #[test]
 fn simple_chars() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, "abc", "abcd", "abc");
     find(false, "bcd", "abcd", "bcd");
     find(false, "bcd", "abcde", "bcd");
@@ -175,6 +194,8 @@ fn simple_chars() {
 
 #[test]
 fn rep_chars() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, "abc*d", "abcdz", "abcd");
     find(false, "abc+d", "abcdz", "abcd");
     find(false, "abc*d", "abccdz", "abccd");
@@ -192,6 +213,8 @@ fn rep_chars() {
     
 #[test]
 fn unicode() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, "abc", "ab你好abcd", "abc");
     find(false, "你好", "ab你好abcd", "你好");
     find(false, "你好you-all", "ab你好you-allabcd", "你好you-all");
@@ -202,6 +225,8 @@ fn unicode() {
     
 #[test]
 fn special_chars() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, "ab.de", "aabcdef", "abcde");
     find(false, "ab.*de", "abcdedefg", "abcdede");
     not_find(false, "cde.", "abcde");
@@ -221,6 +246,8 @@ fn special_chars() {
     
 #[test]
 fn set_chars() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, r"[abc]+", "xabacaacd", "abacaac");
     find(false, r"z[abc]*z", "abzzcd", "zz");
     find(false, r"z[abc]*z", "abzaabczcd", "zaabcz");
@@ -232,6 +259,8 @@ fn set_chars() {
 
 // #[test]
 fn non_set_chars() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, "a[^hgf]*", "aabcdefghij", "aabcde");
     find(false, "a[^e-m]*", "aabcdefghij", "aabcd");
     find(false, "a[^-e-m]*", "xab-cdefghij", "ab");
@@ -242,6 +271,8 @@ fn non_set_chars() {
 
 #[test]
 fn basic_or() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, r"abc\|de", "xxxabceyy", "abce");
     find(false, r"abc\|de", "xxxabdeyy", "abde");
     find(false, r"abc\|d", "xxxabdeyy", "abd");
@@ -264,6 +295,8 @@ fn basic_or() {
 
 #[test]
 fn lazy() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, r"abc*", "xabccc", "abccc");
     find(false, r"abc*?", "xabccc", "ab");
     find(false, r"abc+?", "xabccc", "abc");
@@ -280,6 +313,8 @@ fn lazy() {
 
 #[test]
 fn former_bugs() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(false, r"\(de\)*d", "dededede", "dededed");
     find(false, r"x\(abc\)+\|\(de\)*d", "xxxdededede", "xdededed");
 }
@@ -311,6 +346,8 @@ fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (us
 // checks I could pass the checks to the Report.
 #[test]
 fn reports() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     // basic
     report_test("asd", ".asd.", false, |report: &Report| {
         check_report(report, "asd", (1, 4), (1, 4), 0);
@@ -384,6 +421,8 @@ fn e_check(alt: bool, re: &str, ecode: usize) {
 }
 #[test]
 fn errors() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     e_check(false, r"abc\(de", 1);
     e_check(false, r"\(?<asd\)", 2);
     // 3 should not happen
@@ -398,6 +437,8 @@ fn errors() {
 
 #[test]
 fn alt_chars() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(true, r"abc", "xabcd", "abc");
     find(true, r"abc ", "xabcd", "abc");
     find(true, "\"abc\"", "xabcd", "abc");
@@ -425,6 +466,8 @@ fn alt_chars() {
 
 #[test]
 fn alt_or() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(true, r"or('abc'
  	'def')", "xdefd", "def");
     find(true, r"or(a{3} y+ z )", "aayx", "y");
@@ -435,6 +478,8 @@ fn alt_or() {
 
 #[test]
 fn alt_def() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     find(true, "def(xx: 'xyz') w get(xx)", "vwxyz", "wxyz");
     find(true, "def(aa: 'xyz') w get(aa) get(aa)", "vwxyzxyz", "wxyzxyz");
     find(true, "use(src/regexp/test.re) a get(a)", "aabcdef", "abcd");
@@ -444,6 +489,8 @@ fn alt_def() {
 
 #[test]
 fn alt_err() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     e_check(true, "\"asd", 102);
     e_check(true, r"and(abc def)", 104);
     // the OR reads the trailing ')' for the wrapping AND node, which is why this is not 105
@@ -461,6 +508,8 @@ fn alt_err() {
 }
 #[test]
 fn runtime_error() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     // infinite loop test
     if let Ok(tree) = parse_tree(r"and('x'*)*", true) {
         match walk_tree(&tree, "abccc", "") {
@@ -474,6 +523,8 @@ fn runtime_error() {
 #[test]
 // check that X*<NAME> and X<NAME>* behave right
 fn alt_report() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     report_test(r"a and('bc'<n1>* '你好'*<n2>)", "xabcbc你好你好", true, |report| {
         check_report(report, "abcbc你好你好", (1, 10), (1, 18), 3);
         check_report(&report.subreports[0], "bc", (2, 4), (2, 4), 0);
@@ -485,3 +536,17 @@ fn alt_report() {
         assert_eq!(n2.len(), 1, "*<n> test failed");
     });
 } 
+
+#[test]
+fn from_file() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
+    print!("RUNNING file input test");
+    std::io::stdout().flush().unwrap();
+    let tree = parse_tree("XXX", false).unwrap_or_else(|msg| panic!("Parse failed for re \"XXX\": {}", msg));
+    let path = walk_tree(&tree, "", "README")
+        .unwrap_or_else(|err| panic!("Expected \"XXX\", got error '{}'", err))
+        .unwrap_or_else(|| panic!("Expected \"XXX\", found none"));
+    assert_eq!(path.matched_string(), "XXX", "expected \"XXX\", found \"{}\"", path.matched_string());
+    println!("OK");
+}

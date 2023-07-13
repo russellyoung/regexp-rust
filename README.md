@@ -31,6 +31,16 @@ a few week's rest I decided to give it a go.
 
 **DONE!**
 
+The last feature has been added: accepting input from stdin or a file.
+It uses mutex to maintain a static string value. This may not be the best
+way to do it - if I were starting over I'd pass a state containing the
+current string down through the call tree, but retrofitting the working
+program to do that would have been a real job, and this way works. It 
+does have some less than ideal results though - the testing needs to be 
+throttled to run single threaded, and interactive became a little more
+complicated because it uses RE parsing to parse the command lines as 
+well as the user input.
+
 It is written and seems to be working. Besides standard regular
 expressions I designed a new regular expression format that is both
 more general and simpler than "regular" regular expressions. This was

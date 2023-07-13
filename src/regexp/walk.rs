@@ -545,7 +545,7 @@ impl<'a> CharsStep<'a> {
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<CharsStep<'a>> {
         let mut step = CharsStep {node: self.node, matched: self.matched.next(0)};
-        Input::extend_quiet(step.matched.start + self.node.string.len());
+        Input::extend_quiet(step.matched.start + self.node.string.len() + 1);
         if step.matched.end == Input::len() { return None; }
         if let Some(size) = step.node.matches(&INPUT.lock().unwrap().full_text[step.matched.start..]) {
             step.matched.move_end(size as isize);
@@ -1009,30 +1009,6 @@ impl Input {
             println!("Input error: {:?}", err);
         }
     }
-/*
-    /// Executes the function F() with an argument &str, a slice of the search string
-    pub fn with_string<T>(f: fn(&str) -> T, start: usize, o_end: Option<usize>) -> T {
-        let input = INPUT.lock().unwrap();
-        let e0 = if let Some(e) = o_end { e - input.b_cleaned } else { input.full_text.len() };
-        let end = if e0 > input.full_text.len() { input.full_text.len() } else { e0 };
-        f(&input.full_text[start - input.b_cleaned..end])
-    }
-
-    /// Executes the function F() with an argument &str, a slice of the search string determined by the arg MATCHED
-    pub fn from_matched<T>(f: fn(&str) -> T, matched: &Matched) -> T {
-        Input::with_string(f, matched.start, Some(matched.end))
-    }
-
-    /// Returns an allocated string for the given range. Use only in places like debugging or rarely called functions, otherwise use with_string()
-    pub fn get_string(start: usize, o_end: Option<usize>) -> String {
-        Input::with_string(|s| s.to_string(), start, o_end)
-    }
-
-    /// Returns an allocated string for the given range. Use only in places like debugging or rarely called functions, otherwise use from_matched()
-    pub fn matched_string(matched: &Matched) -> String {
-        Input::get_string(matched.start, Some(matched.end))
-    }
-*/
 
     pub fn len() -> usize{
         let input = INPUT.lock().unwrap();

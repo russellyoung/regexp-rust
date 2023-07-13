@@ -147,7 +147,7 @@
 //!         Ok(node) => node,
 //!         Err(error) => { return Err(error); },
 //!     };
-//!     match regexp::walk_tree(&tree, text) {
+//!     match regexp::walk_tree(&tree, text, file) {
 //!         Ok(Some((path, char_start, bytes_start))) => {
 //!             return Ok(Some(Report::new(&path, char_start, bytes_start).display(0)))
 //!         },
@@ -155,7 +155,12 @@
 //!         Err(error) => Err(error),
 //!     }
 //! }
+//!
 //!```
+//!
+//! The TEXT argument to walk_tree() is the text to search, if it is non-empty. If it is empty the FILE argument gives
+//! a file name to read for the input text. If both are empty, or TEXT is empty and FILE is "-" then the input is read from stdin.
+//!
 //! #### Interactive
 //! There is also an interactive mode which allows storing of multiple regular expressions and text strings. From the help:
 //! This is an interactive interface to the regexp search engine. The program keeps stacks of  
@@ -296,7 +301,7 @@ impl Config {
         if !"alternative".starts_with(&config.parser) && ! "traditional".starts_with(&config.parser) {
             Err("Choices for parser are 'traditional' or 'alternative'")
         } else if config.interactive {
-            if config.file.is_empty() { Err("FILE cannot be specified for interactive run") }
+            if !config.file.is_empty() { Err("FILE cannot be specified for interactive run") }
             else if config.tree { Err("TREE cannot be specified for interactive run") }
             else { Ok(config) }
         }

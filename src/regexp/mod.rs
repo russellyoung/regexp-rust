@@ -793,6 +793,10 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
 /// This is the entrypoint to the phase 2, (tree walk) processing. It
 /// is put in this package to make it easier available, since
 /// logically it is part of the regexp search functionality.
+/// If TEXT is non-empty then the string TEXT is searched for the RE represented by TREE. If TEXT is empty then
+/// FILE is opened and read to get the string to search. If FILE also is empty (or if FILE = "-") then the string to
+/// search is read from stdin.
+
 pub fn walk_tree<'a>(tree: &'a Node, text: &str, file: &str) -> Result<Option<walk::Path<'a>>, Error> {
     if !file.is_empty() { Input::from_file(file)? }
     else if !text.is_empty() && text != "-" { Input::from_cmdline(text)? }
@@ -803,7 +807,9 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &str, file: &str) -> Result<Option<wa
     // hey, optimization
     // deosn't save that much time but makes the trace debug easier to read
     let root = {if let Node::And(r) = tree { r } else { return Err(Error::make(5, "Root of tree should be Node::And (should not happen)")); }};
-
+    /*
+    // If the initial node is a character this optimizes by searching for the initial string. It is commented out
+    // because it doesn't account for FILE or STDIN input
     if !root.anchor {
         if let Node::Chars(chars_node) = &root.nodes[0] {
             if chars_node.limits.min > 0 {
@@ -821,7 +827,7 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &str, file: &str) -> Result<Option<wa
             }
         }
     }
-
+*/
     loop {
         if trace(1) {println!("\n==== WALK \"{}\" ====", &INPUT.lock().unwrap().full_text[start_pos..])}
         let matched = Matched { start: start_pos, end: start_pos, char_start };
