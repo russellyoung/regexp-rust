@@ -258,12 +258,15 @@ pub struct Config {
     /// Regular expression to search for (required unless --interactive)
     #[clap(default_value_t = String::from(""))]
     pub re: String,
-    /// String to search (required, unless --tree or --interactive)
+    /// String to search. ( --tree or --interactive)
     #[clap(default_value_t = String::from(""))]
     pub text: String,
     /// Parser to use. Will accept abbreviations. Currently supported are 'traditional' and 'alternative'.
     #[clap(short, long, default_value_t = String::from(PARSER_DEFAULT))]
-    pub parser: String, 
+    pub parser: String,
+    /// If given, file to search. "-" means read from stdin
+    #[clap(short, long, default_value_t = String::from(""))]
+    pub file: String, 
     /// Start up an interactive session
     #[clap(short, long, default_value_t = false)]
     pub interactive: bool,
@@ -280,7 +283,7 @@ pub struct Config {
     #[clap(short, long, default_value_t = false, )]
     pub named: bool,
     // length of text to display in the --debug output
-    /// When tracing the walk phase abbreviate the display of current string to LENGTH chars
+    /// When tracing the walk phase abbreviate the display of current string to ABBREV chars
     #[clap(short, long, default_value_t = ABBREV_DEFAULT, value_parser=value_parser!(u32).range(1..))]
     pub abbrev: u32,
 }
@@ -292,12 +295,17 @@ impl Config {
         let config = Config::parse();
         if !"alternative".starts_with(&config.parser) && ! "traditional".starts_with(&config.parser) {
             Err("Choices for parser are 'traditional' or 'alternative'")
-        } else if config.interactive { Ok(config) }
+        } else if config.interactive {
+            if config.file.is_empty() { Err("FILE cannot be specified for interactive run") }
+            else if config.tree { Err("TREE cannot be specified for interactive run") }
+            else { Ok(config) }
+        }
         else if config.re.is_empty() {
             Err("RE is required unless --interactive given")
-        } else if config.text.is_empty() && !config.tree {
-            Err("TEXT is required unless --interactive or --tree given")
-        } else {Ok(config)}
+        } else if !config.text.is_empty() && !config.file.is_empty() {
+            Err("FILE cannot be given if RE is passed in")
+        }
+        else {Ok(config)}
     }
 
     pub fn alt_parser(&self) -> bool { "traditional".starts_with(&self.parser) }
@@ -326,37 +334,37 @@ pub fn main() {
     if config.interactive { return Interactive::new(config).run(); }
     set_trace(config.debug as usize);
     // execution starts
+    
     match regexp::parse_tree(&config.re, "alternative".starts_with(&config.parser)) {
         Err(error) => println!("{}", error),
         Ok(tree) => {
             if config.tree {
                 println!("--- Parse tree:");
                 tree.desc(0);
+                return;
             }
-            //println!("{:?}", config);
-            if !config.text.is_empty() {
-                match regexp::walk_tree(&tree, &config.text) {
-                    Ok(Some(path)) => {
-                        if config.walk {
-                            println!("--- Walk:");
-                            path.dump(0);
-                            println!("--- End walk");
-                        }
-                        let report = Report::new(&path);
-                        report.display(0);
-                        if config.named {
-                            for (name, v) in report.get_named() {
-                                if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v.last().unwrap().string()); }
-                                else {
-                                    println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
-                                    v.iter().for_each(|x| println!("    \"{}\"", x.string()));
-                                }
+
+            match regexp::walk_tree(&tree, &config.text, &config.file) {
+                Ok(Some(path)) => {
+                    if config.walk {
+                        println!("--- Walk:");
+                        path.dump(0);
+                        println!("--- End walk");
+                    }
+                    let report = Report::new(&path);
+                    report.display(0);
+                    if config.named {
+                        for (name, v) in report.get_named() {
+                            if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v.last().unwrap().string()); }
+                            else {
+                                println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
+                                v.iter().for_each(|x| println!("    \"{}\"", x.string()));
                             }
                         }
                     }
-                    Ok(None) => println!("No match"),
-                    Err(error) => println!("{}", error)
                 }
+                Ok(None) => println!("No match"),
+                Err(error) => println!("{}", error)
             }
         }
     }

@@ -5,6 +5,11 @@
 //! **Path* is returned, representing a matched string, so it can generate a **Report** giving its route.
 use super::*;
 use crate::{trace, trace_indent, trace_change_indent};
+use std::io::BufReader;
+use std::io::BufRead;
+//use lazy_static::lazy_static;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 /// simplifies code a little by removing the awkward accessing of the last element in a vector
 
@@ -22,28 +27,28 @@ use crate::{trace, trace_indent, trace_change_indent};
 pub struct CharsStep<'a> {
     /// The node from phase 1
     node: &'a CharsNode,
-    matched: Matched<'a>,
+    matched: Matched,
 }
 
 /// Represents a single step for a SpecialNode (a special character)
 pub struct SpecialStep<'a> {
     /// The node from phase 1
     node: &'a SpecialNode,
-    matched: Matched<'a>,
+    matched: Matched,
 }
 
 /// Represents a single step for a RangeNode (ie [abcx-z])
 pub struct RangeStep<'a> {
     /// The node from phase 1
     node: &'a RangeNode,
-    matched: Matched<'a>,
+    matched: Matched,
 }
 
 /// Represents a single step for an AndNode (a collection of 0 or more nodes that all must match)
 pub struct AndStep<'a> {
     /// The node from phase 1
     node: &'a AndNode,
-    matched: Matched<'a>,
+    matched: Matched,
     /// A vector of Paths saving the current state of this And node. Each entry is a **Path** based on the **nodes** member of the **AndNode** structure.
     /// When the Paths vector is filled this step for the And node has succeeded.
     child_paths: Vec<Path<'a>>,
@@ -53,7 +58,7 @@ pub struct AndStep<'a> {
 pub struct OrStep<'a> {
     /// The node from phase 1
     node: &'a OrNode,
-    matched: Matched<'a>,
+    matched: Matched,
     /// The OR node needs only a single branch to succeed. This holds the successful path
     child_path: Box<Path<'a>>,
     /// This points to the entry in **node.nodes** which is currently in the **child_path** element
@@ -110,9 +115,10 @@ impl<'a> Path<'a> {
     }
     
     /// gets the subset of the target string matched by this **Path**
-    pub fn matched_string(&'a self) -> &'a str {
+    /// For debug use: allocates String
+    pub fn matched_string(&'a self) -> String {
         let (first, last) = self.first_last();
-        &first.full_string[first.start..last.end]
+        INPUT.lock().unwrap().full_text[first.start..last.end].to_string()
     }
 
     /// returns ths **Limit** object for the Path
@@ -371,7 +377,7 @@ fn loop_check(&matched: &Matched, limits: &Limits) -> Result<(), Error> {
 /// Experimental: I want to use this to simplify the **impl Path ** code. It is begun but not implemented yet
 ///
 trait Walker<'a> {
-    fn make_report(&'a self) -> Report<'a>;
+    fn make_report(&'a self) -> Report;
     fn name_details(&self) -> (&Option<String>, bool);
     fn get_matched(&self) -> Matched;
 }
@@ -508,10 +514,10 @@ impl<'a> Debug for Path<'a> {
 
 impl<'a> Walker<'a> for CharsStep<'a> {
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&'a self) -> Report<'a> {
+    fn make_report(&'a self) -> Report {
         Report {matched: self.matched,
                  name: self.node.named.clone(),
-                 subreports: Vec::<Report<'a>>::new()}
+                 subreports: Vec::<Report>::new()}
     }
     fn name_details(&self) -> (&Option<String>, bool) { (&self.node.named, self.node.name_outside) }
     fn get_matched(&self) -> Matched { self.matched }
@@ -520,7 +526,7 @@ impl<'a> Walker<'a> for CharsStep<'a> {
 // Any way to make walk() generic?
 impl<'a> CharsStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a CharsNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
+    pub fn walk(node: &'a CharsNode, matched: Matched) -> Result<Path<'a>, Error> {
         let mut steps = vec![CharsStep {node, matched}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
@@ -539,8 +545,9 @@ impl<'a> CharsStep<'a> {
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<CharsStep<'a>> {
         let mut step = CharsStep {node: self.node, matched: self.matched.next(0)};
-        if step.matched.end == step.matched.full_string.len() { return None; }
-        if let Some(size) = step.node.matches(step.matched.unterminated()) {
+        Input::extend_quiet(step.matched.start + self.node.string.len());
+        if step.matched.end == Input::len() { return None; }
+        if let Some(size) = step.node.matches(&INPUT.lock().unwrap().full_text[step.matched.start..]) {
             step.matched.move_end(size as isize);
             Some(step)
         } else { None }
@@ -552,10 +559,10 @@ impl<'a> CharsStep<'a> {
 
 impl<'a> Walker<'a> for SpecialStep<'a> {
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&'a self) -> Report<'a> {
+    fn make_report(&'a self) -> Report {
         Report {matched: self.matched,
                 name: self.node.named.clone(),
-                subreports: Vec::<Report<'a>>::new()}
+                subreports: Vec::<Report>::new()}
     }
     fn name_details(&self) -> (&Option<String>, bool) { (&self.node.named, self.node.name_outside) }
     fn get_matched(&self) -> Matched { self.matched }
@@ -563,7 +570,7 @@ impl<'a> Walker<'a> for SpecialStep<'a> {
 
 impl<'a> SpecialStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a SpecialNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
+    pub fn walk(node: &'a SpecialNode, matched: Matched) -> Result<Path<'a>, Error> {
         let mut steps = vec![SpecialStep {node, matched}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
@@ -583,7 +590,7 @@ impl<'a> SpecialStep<'a> {
     fn step(&self) -> Option<SpecialStep<'a>> {
         let mut step = SpecialStep {node: self.node, matched: self.matched.next(0)};
 //        if step.matched.end == step.matched.full_string.len() { return None; }
-        if let Some(size) = step.node.matches(step.matched.unterminated()) {
+        if let Some(size) = step.node.matches(&INPUT.lock().unwrap().full_text[step.matched.start..]) {
             step.matched.move_end(size as isize);
             Some(step)
         } else { None }
@@ -596,10 +603,10 @@ impl<'a> SpecialStep<'a> {
 
 impl<'a> Walker<'a> for RangeStep<'a> {
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&'a self) -> Report<'a> {
+    fn make_report(&'a self) -> Report {
         Report {matched: self.matched,
                 name: self.node.named.clone(),
-                subreports: Vec::<Report<'a>>::new()}
+                subreports: Vec::<Report>::new()}
     }
     fn name_details(&self) -> (&Option<String>, bool) { (&self.node.named, self.node.name_outside) }
     fn get_matched(&self) -> Matched { self.matched }
@@ -607,7 +614,7 @@ impl<'a> Walker<'a> for RangeStep<'a> {
 
 impl<'a> RangeStep<'a> {
     /// start a Path using a string of chars, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a RangeNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
+    pub fn walk(node: &'a RangeNode, matched: Matched) -> Result<Path<'a>, Error> {
         let mut steps = vec![RangeStep {node, matched}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
@@ -626,8 +633,9 @@ impl<'a> RangeStep<'a> {
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<RangeStep<'a>> {
         let mut step = RangeStep {node: self.node, matched: self.matched.next(0)};
-        if step.matched.end == step.matched.full_string.len() { return None; }
-        if let Some(size) = step.node.matches(step.matched.unterminated()) {
+        if step.matched.end == Input::len() { return None; }
+        
+        if let Some(size) = step.node.matches(&INPUT.lock().unwrap().full_text[step.matched.start..]) {
             step.matched.move_end(size as isize);
             Some(step)
         } else { None }
@@ -640,8 +648,8 @@ impl<'a> RangeStep<'a> {
 
 impl<'a> Walker<'a> for AndStep<'a> {
     /// Compiles a **Report** object from this path and its children after a successful search
-    fn make_report(&'a self) -> Report<'a> {
-        let mut reports = Vec::<Report<'a>>::new();
+    fn make_report(&'a self) -> Report {
+        let mut reports = Vec::<Report>::new();
         for p in &self.child_paths {
             let mut subreports = p.gather_reports();
             reports.append(&mut subreports);
@@ -656,7 +664,7 @@ impl<'a> Walker<'a> for AndStep<'a> {
 
 impl<'a> AndStep<'a> {
     /// start a Path using an And node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a AndNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
+    pub fn walk(node: &'a AndNode, matched: Matched) -> Result<Path<'a>, Error> {
         let mut steps = vec![AndStep {node, matched, child_paths: Vec::<Path<'a>>::new()}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
@@ -753,7 +761,7 @@ impl<'a> AndStep<'a> {
 
 impl<'a> Walker<'a> for OrStep<'a> {
     /// Compiles a **Report** object from this path and its child after a successful search
-    fn make_report(&'a self) -> Report<'a> {
+    fn make_report(&'a self) -> Report {
         let subreports = self.child_path.gather_reports();
         Report { matched: self.matched,
                  name: self.node.named.clone(),
@@ -767,7 +775,7 @@ impl<'a> Walker<'a> for OrStep<'a> {
 impl<'a> OrStep<'a> {
     
     /// start a Path using an And node, matching as many times as it can subject to the matching algorithm (greedy or lazy)
-    pub fn walk(node: &'a OrNode, matched: Matched<'a>) -> Result<Path<'a>, Error> {
+    pub fn walk(node: &'a OrNode, matched: Matched) -> Result<Path<'a>, Error> {
         let mut steps = vec![OrStep {node, matched, child_path: Box::new(Path::None), which: 0}];
         trace_start_walk(&steps);
         for _i in 1..=node.limits.initial_walk_limit() {
@@ -842,10 +850,10 @@ impl<'a> OrStep<'a> {
 /// **Matched** is used to keep track of the state of the search
 /// string. It holds the whole string as well as offset to the
 /// beginning and end of the substring matched by its owning **Step**.
-#[derive(Copy)]
-pub struct Matched<'a> {
-    /// the String where this match starts
-    pub full_string: &'a str,
+#[derive(Copy,Clone)]
+pub struct Matched {
+//    /// the String where this match starts
+//    pub full_string: &'a str,
     /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
     pub start: usize,
     /// The length of the string in bytes. Important: this is not in chars. Since it is in bytes the actual matching string is string[0..__match_len__]
@@ -854,29 +862,26 @@ pub struct Matched<'a> {
     pub char_start: usize,
 }
 
-impl<'a> Debug for Matched<'a> {
+impl<'a> Debug for Matched {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "match \"{}\" [{}-{}) from {}", self.string(), self.start, self.end, self.abbrev())
+        write!(f, "match \"{}\" [{}-{})", &INPUT.lock().unwrap().full_text[self.start..self.end], self.start, self.end, )
     }
 }
-impl<'a> Clone for Matched<'a> {
-    fn clone(&self) -> Self { Matched {full_string: self.full_string, start: self.start, end: self.end, char_start: self.char_start} }
-}
 
-impl<'a> Matched<'a> {
+impl<'a> Matched {
     /// Returns the length of the match in bytes
     pub fn len_bytes(&self) -> usize { self.end - self.start }
     /// Returns the length of the match in chars
-    pub fn len_chars(&self) -> usize { self.string().chars().count() }
+    pub fn len_chars(&self) -> usize { INPUT.lock().unwrap().full_text[self.start..self.end].chars().count() }
     /// Returns pointer to the matching str slice
-    pub fn string(&self) -> &str { &self.full_string[self.start..self.end] }
+//    pub fn string(&self) -> &str { &self.full_string[self.start..self.end] }
     /// returns the remainder of the str starting from the match beginning
-    fn unterminated(&self) -> &str { &self.full_string[self.start..] }
+//    fn unterminated(&self) -> &str { &self.full_string[self.start..] }
     /// returns the remainder of the str starting from the match end
-    fn remainder(&self) -> &str { &self.full_string[self.end..] }
+//    fn remainder(&self) -> &str { &self.full_string[self.end..] }
     /// Builds a new Matched object immediately following the one pointed to by self
-    fn next(&self, len: usize) -> Matched<'a> {
-        Matched {full_string: self.full_string, start: self.end, end: self.end + len, char_start: self.char_start + self.len_chars() }
+    fn next(&self, len: usize) -> Matched {
+        Matched {start: self.end, end: self.end + len, char_start: self.char_start + self.len_chars() }
     }
     /// Moves the end of Matched by the amount given
     fn move_end(&mut self, delta: isize) {
@@ -890,8 +895,148 @@ impl<'a> Matched<'a> {
     /// **abbrev()** is used in the pretty-print of steps: The display prints out the string at the start of the step. If it is too
     /// long it distracts from the other output. **abbrev** limits the length of the displayed string by replacing its end with "..."
     fn abbrev(&self) -> String {
-        let s = &self.full_string[self.start..].chars().take(crate::get_abbrev()).collect::<String>();
-        let dots = if s.len() < self.full_string.len() - self.start {"..."} else {""};
+        let full_text = &INPUT.lock().unwrap().full_text;
+        let s = &full_text[self.start..].chars().take(crate::get_abbrev()).collect::<String>();
+        let dots = if s.len() < full_text.len() - self.start {"..."} else {""};
         format!("\"{}\"{}", s, dots)
     }
 }
+
+/// Used to extend the buffered search text when needed
+#[derive(Default)]
+enum Source { #[default] None, CmdLine, Stdin(BufReader<std::io::Stdin>), File(BufReader<std::fs::File>) }
+
+impl Source {
+    /// Extends by unit of BLOCK_SIZE if possible. Returns String to add along with boolean telling if the input is exhausted, or program error format
+    fn extend(&mut self) -> Result<(String, bool), Error> {
+        let mut string = "".to_string();
+        let mut more  = true;
+        match self {
+            Source::CmdLine => more = false,
+            Source::File(stream) => {
+                while more && string.len() < Input::BLOCK_SIZE {
+                    match stream.read_line(&mut string) {
+                        std::io::Result::Err(error) => { return Err(Error::make(210, &error.to_string())); },
+                        std::io::Result::Ok(bytes) => more = bytes > 0,
+                    }
+                };
+            },
+            Source::Stdin(stream) => {
+                while more && string.len() < Input::BLOCK_SIZE {
+                    match stream.read_line(&mut string) {
+                        std::io::Result::Err(error) => { return Err(Error::make(210, &error.to_string())); },
+                        std::io::Result::Ok(bytes) => more = bytes > 0,
+                    }
+                };
+            },
+            Source::None => panic!("No input source has been set")
+        }
+        Ok((string, more))
+    }
+}
+
+#[derive(Default)]
+pub struct Input {
+    /// The text currently in the buffer
+    pub full_text: String,
+    /// The source for getting more text
+    source: Source,
+    more_input: bool
+}
+
+//static mut INPUT: Input = Input::default();
+pub static INPUT: Lazy<Mutex<Input>> = Lazy::new(|| Mutex::new(Input::default()));
+
+impl Input {
+    const BLOCK_SIZE: usize = 500;
+
+    //
+    // Creation 
+    //
+    /// creates a text buffer getting the string from the command line
+    pub fn from_cmdline(text: &str) -> Result<(), Error> {
+        let mut input = INPUT.lock().unwrap();
+        input.source = Source::CmdLine;
+//        input.full_text = text;
+        input.full_text = text.to_string();
+        Ok(())
+    }
+
+    /// creates a text buffer getting the string from stdin
+    pub fn from_stdin() -> Result<(), Error> {
+        {
+            let mut input = INPUT.lock().unwrap();
+            input.source = Source::Stdin(BufReader::new(std::io::stdin()));
+            input.more_input = true;
+        }
+        Input::extend(1)?;  // any positive number forces a read
+        Ok(())
+    }
+
+    /// creates a text buffer getting the string from the given file
+    pub fn from_file(filename: &str) -> Result<(), Error> {
+        if filename == "-" { Input::from_stdin() }
+        else {
+            match std::fs::File::open(filename) {
+                Err(msg) => Err(Error::make(201, &msg.to_string())),
+                Ok(file) => {
+                    {
+                        let mut input = INPUT.lock().unwrap();
+                        input.source = Source::File(BufReader::new(file));
+                        input.more_input = true;
+                    }
+                    Input::extend(1)?;  // any positive number forces a read
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// Checks that the input string is either fully read in or exceeds SIZE_BYTES in length
+    pub fn extend(size_bytes: usize) -> Result<(), Error> {
+        let mut input = INPUT.lock().unwrap();
+        if input.more_input && input.full_text.len() < size_bytes {
+            let (string, more) = input.source.extend()?;
+            input.more_input = more;
+            input.full_text.push_str(&string);
+        }
+        Ok(())
+    }
+
+    // Like Input::extend() except prints any error and continues with the current string
+    pub fn extend_quiet(size_bytes: usize) {
+        if let Err(err) = Input::extend(size_bytes) {
+            println!("Input error: {:?}", err);
+        }
+    }
+/*
+    /// Executes the function F() with an argument &str, a slice of the search string
+    pub fn with_string<T>(f: fn(&str) -> T, start: usize, o_end: Option<usize>) -> T {
+        let input = INPUT.lock().unwrap();
+        let e0 = if let Some(e) = o_end { e - input.b_cleaned } else { input.full_text.len() };
+        let end = if e0 > input.full_text.len() { input.full_text.len() } else { e0 };
+        f(&input.full_text[start - input.b_cleaned..end])
+    }
+
+    /// Executes the function F() with an argument &str, a slice of the search string determined by the arg MATCHED
+    pub fn from_matched<T>(f: fn(&str) -> T, matched: &Matched) -> T {
+        Input::with_string(f, matched.start, Some(matched.end))
+    }
+
+    /// Returns an allocated string for the given range. Use only in places like debugging or rarely called functions, otherwise use with_string()
+    pub fn get_string(start: usize, o_end: Option<usize>) -> String {
+        Input::with_string(|s| s.to_string(), start, o_end)
+    }
+
+    /// Returns an allocated string for the given range. Use only in places like debugging or rarely called functions, otherwise use from_matched()
+    pub fn matched_string(matched: &Matched) -> String {
+        Input::get_string(matched.start, Some(matched.end))
+    }
+*/
+
+    pub fn len() -> usize{
+        let input = INPUT.lock().unwrap();
+        input.full_text.len()
+    }
+}
+

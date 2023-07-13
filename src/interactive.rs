@@ -15,6 +15,7 @@
 use crate::regexp::*;
 use crate::set_trace;
 use crate::Config;
+use crate::regexp::walk::INPUT;
 use std::io;
 use std::io::Write;    
 use core::fmt::Debug;
@@ -35,7 +36,7 @@ impl Debug for RegExp {
 
 impl RegExp {
     /// Guesses the type of a regular expression and gets confirmation of its choice from the user
-    fn guess_type(maybe_re: &str) -> Option<RegExp> {
+    fn guess_type(maybe_re: &String) -> Option<RegExp> {
         let (prompt, dflt) = if maybe_re.contains("and(") || maybe_re.contains("or(") || maybe_re.contains("get(") {
             ("This looks like an alternative RE type. It is t[raditional], [alternative], c[ancel]", 1)
         } else if maybe_re.contains('\\') || maybe_re.contains('*') || maybe_re.contains('+') {
@@ -170,7 +171,7 @@ impl Interactive {
 
     /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
     fn do_command(&mut self, input: &str, cmd_parse_tree: &Node) -> bool{
-        match walk_tree(cmd_parse_tree, input) {
+        match walk_tree(cmd_parse_tree, input, &"") {
             Ok(Some(path)) => {
                 let report = Report::new(&path);
                 let words = report.get_by_name("words");
@@ -183,7 +184,7 @@ impl Interactive {
     
     /// executes the user commands
     fn execute_command(&mut self, words: &Vec<&Report>) -> bool {
-        match get_command(&COMMANDS, words[0].string()) {
+        match get_command(&COMMANDS, &words[0].string()) {
             "regexp" => self.do_re(words),
             "text" => self.do_text(words),
             "search" => self.do_search(words),
@@ -202,7 +203,7 @@ impl Interactive {
     /// executes a **regexp** command
     fn do_re(&mut self, words: &Vec<&Report>) {
         let len = self.res.len();
-        let subcmd = if words.len() > 1 { get_command(&["pop", "history", "list", "traditional", "alternative"], words[1].string()) } else { "" };
+        let subcmd = if words.len() > 1 { get_command(&["pop", "history", "list", "traditional", "alternative"], &words[1].string()) } else { "" };
         match subcmd {
             "" =>  {
                 if let Some(re) = self.re() { println!("current RE: {:?}", re); }
@@ -237,7 +238,7 @@ impl Interactive {
                         println!("Using {:?}", re);
                         self.res.push(re);
                     }
-                } else if let Some(re) = RegExp::guess_type(input_substring(words, 1, 1000)) {
+                } else if let Some(re) = RegExp::guess_type(&input_substring(words, 1, 1000)) {
                     self.res.push(re);
                 } else { println!("Unrecognized re subcommand"); }
             },
@@ -246,7 +247,7 @@ impl Interactive {
     
     /// executes a *text* command
     fn do_text(&mut self, words:&Vec<&Report>) {
-        let subcmd = if words.len() > 1 { get_command(&["pop", "history", "list", "set"], words[1].string()) } else { "" };
+        let subcmd = if words.len() > 1 { get_command(&["pop", "history", "list", "set"], &words[1].string()) } else { "" };
         let len = self.texts.len();
         match subcmd {
             "" =>  {
@@ -304,7 +305,7 @@ impl Interactive {
     /// executes a **search** command: parses and prints the results for the current regexp and text
     fn do_search(&self, words: &Vec<&Report>) {
         let mut trace: usize = 0;
-        let mut names = Vec::<&str>::new();
+        let mut names = Vec::<String>::new();
         let mut all = false;
         let mut ptr = 1;
         if words.len() > 1 {
@@ -326,7 +327,7 @@ impl Interactive {
                     Err(err) => println!("Error parsing RE: {}", err.msg),
                     Ok(node) => {
                         set_trace(trace);
-                        match walk_tree(&node, text) {
+                        match walk_tree(&node, text, "") {
                             Err(msg) => println!("Error: {}", msg),
                             Ok(None) => println!("No match"),
                             Ok(Some(path)) => {
@@ -339,8 +340,8 @@ impl Interactive {
                                 } else {
                                     let reports = report.get_named();
                                     for name in names {
-                                        if let Some(matches) =  reports.get(name) {
-                                            print_named_match(name, matches);
+                                        if let Some(matches) =  reports.get(name.as_str()) {
+                                            print_named_match(&name, matches);
                                         }
                                     }
                                 }
@@ -413,13 +414,13 @@ fn get_command(candidates: &'static [&str], cmd: &str) -> &'static str {
 }
 
 /// gets the raw input string from the user input, retaining all whitespace characters
-fn input_substring<'a> (words: &Vec<&'a Report>, from: usize, to: usize) -> &'a str {
+fn input_substring<'a> (words: &Vec<&'a Report>, from: usize, to: usize) -> String {
     let len = words.len();
-    if from >= len { "" }
+    if from >= len { "".to_string() }
     else {
         let r0 = words[from]; 
         let r1 = if to < len { words[to] } else { words[len - 1] }; 
-        &r0.full_string()[r0.byte_pos().0..r1.byte_pos().1]
+        INPUT.lock().unwrap().full_text[r0.byte_pos().0..r1.byte_pos().1].to_string()
     }
 }
 

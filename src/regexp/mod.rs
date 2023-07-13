@@ -30,7 +30,7 @@ mod tests;
 
 use std::str::Chars;
 use crate::{trace, trace_indent, trace_change_indent, trace_set_indent, TAB_SIZE};
-use crate::regexp::walk::Matched;
+use crate::regexp::walk::{Matched,INPUT,Input};
 use core::fmt::Debug;
 use std::collections::HashMap;
 use home;
@@ -99,7 +99,7 @@ impl Clone for Node {
 }    
 impl Node {
     /// Distributes a walk request to the proper XXXNode struct
-    fn walk<'a>(&'a self, matched: Matched<'a>) -> Result<walk::Path<'a>, Error> {
+    fn walk<'a>(&'a self, matched: Matched) -> Result<walk::Path<'a>, Error> {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, matched),
             Node::Special(special_node) => walk::SpecialStep::walk(special_node, matched),
@@ -793,7 +793,10 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
 /// This is the entrypoint to the phase 2, (tree walk) processing. It
 /// is put in this package to make it easier available, since
 /// logically it is part of the regexp search functionality.
-pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<walk::Path<'a>>, Error> {
+pub fn walk_tree<'a>(tree: &'a Node, text: &str, file: &str) -> Result<Option<walk::Path<'a>>, Error> {
+    if !file.is_empty() { Input::from_file(file)? }
+    else if !text.is_empty() && text != "-" { Input::from_cmdline(text)? }
+    else { Input::from_stdin()? } 
     trace_set_indent(0);
     let mut start_pos = 0;
     let mut char_start = 0;
@@ -804,12 +807,13 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<walk::Path<
     if !root.anchor {
         if let Node::Chars(chars_node) = &root.nodes[0] {
             if chars_node.limits.min > 0 {
-                match text.find(chars_node.string.as_str()) {
+                let input = INPUT.lock().unwrap();
+                match input.full_text.find(chars_node.string.as_str()) {
                     Some(offset) => {
                         if offset > 0 {
                             if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", chars_node.string, offset); }
                             start_pos = offset;
-                            char_start = text[0..offset].chars().count();
+                            char_start = input.full_text[0..offset].chars().count();
                         }
                     },
                     None => { return Ok(None); }
@@ -819,16 +823,17 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &'a str) -> Result<Option<walk::Path<
     }
 
     loop {
-        if trace(1) {println!("\n==== WALK \"{}\" ====", &text[start_pos..])}
-        let matched = Matched { full_string: text, start: start_pos, end: start_pos, char_start };
+        if trace(1) {println!("\n==== WALK \"{}\" ====", &INPUT.lock().unwrap().full_text[start_pos..])}
+        let matched = Matched { start: start_pos, end: start_pos, char_start };
         let path = tree.walk(matched)?;
         if path.len() > 1 {
             if trace(1) { println!("--- Search succeeded ---") };
             return Ok(Some(path));
         }
-        if trace(1) {println!("==== WALK \"{}\": no match ====", &text[start_pos..])};
+        let input = INPUT.lock().unwrap();
+        if trace(1) {println!("==== WALK \"{}\": no match ====", &input.full_text[start_pos..])};
         if root.anchor { break; }
-        if let Some(ch0) = text[start_pos..].chars().next() {
+        if let Some(ch0) = input.full_text[start_pos..].chars().next() {
             start_pos += String::from(ch0).len();
             char_start += 1;
         } else {
@@ -1345,19 +1350,19 @@ impl Limits {
 //////////////////////////////////////////////////////////////////
 
 #[derive(Debug,Clone)]
-pub struct Report<'a> {
+pub struct Report {
     /// Match information for the step this Report is representing
-    matched: Matched<'a>,
+    matched: Matched,
     /// The name of the field: if None then the field should not be included in the Report tree, if Some("") it is included but
     /// unnamed, otherwise it is recorded with the given name
     pub name: Option<String>,
     /// Array of child Report structs, only non-empty for And and Or nodes. OrNodes will have only a single child node, AndNodes can have many.
-    pub subreports: Vec<Report<'a>>,
+    pub subreports: Vec<Report>,
 }
 
-impl<'a> Report<'a> {
+impl<'a> Report {
     /// Constructor: creates a new report from a successful Path
-    pub fn new(root: &'a crate::regexp::walk::Path) -> Report<'a> {
+    pub fn new(root: &'a crate::regexp::walk::Path) -> Report {
         let mut reports = root.gather_reports();
         let mut ret = reports.splice(0.., None);
         ret.next().unwrap()
@@ -1365,7 +1370,10 @@ impl<'a> Report<'a> {
 
     // API accessor functions
     /// Gets the string matched by this unit
-    pub fn string(&self) -> &str { self.matched.string() }
+    // TODO: Replace this with inline function that does not allocate?
+    pub fn string(&self) -> String {
+        INPUT.lock().unwrap().full_text[self.matched.start..self.matched.end].to_string()
+    }
     /// Gets the start and end position of the match in bytes
     pub fn byte_pos(&self) -> (usize, usize) { (self.matched.start, self.matched.end) }
     /// Gets the start and end position of the match in chars
@@ -1374,13 +1382,15 @@ impl<'a> Report<'a> {
     pub fn len_bytes(&self) -> usize { self.matched.len_bytes() }
     /// Gets the length of the match in chars
     pub fn len_chars(&self) -> usize { self.matched.len_chars() }
-    pub fn full_string(&self) -> &str { self.matched.full_string }
+//    pub fn full_string(&self) -> &str { self.matched.full_string }
     /// Pretty-prints a report with indentation to help make it easier to read
     pub fn display(&self, indent: usize) {
         let name_str = { if let Some(name) = &self.name { format!("<{}> ", name) } else { "".to_string() }};
         print!("{0:1$}", "", indent);
+        let len_chars = self.matched.len_chars();
+        let full_text = &INPUT.lock().unwrap().full_text;
         println!("\"{}\" {}chars start {}, length {}; bytes start {}, length {}",
-                 self.matched.string(), name_str, self.matched.char_start, self.matched.len_chars(), self.matched.start, self.matched.end - self.matched.start);
+                 &full_text[self.matched.start..self.matched.end], name_str, self.matched.char_start, len_chars, self.matched.start, self.matched.end - self.matched.start);
         self.subreports.iter().for_each(move |r| r.display(indent + TAB_SIZE));
     }
 
@@ -1405,7 +1415,7 @@ impl<'a> Report<'a> {
     }
 
     /// internal function that does the work for **get_named()**
-    fn get_named_internal<'b: 'a>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report<'a>>>) -> HashMap<&'b str, Vec<&Report>> {
+    fn get_named_internal<'b: 'a>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report>>) -> HashMap<&'b str, Vec<&Report>> {
         if let Some(name) = &self.name {
             if let Some(mut_v) = hash.get_mut(&name.as_str()) {
                 mut_v.push(self);

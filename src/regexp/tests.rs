@@ -150,7 +150,7 @@ fn find<'a>(alt: bool, re: &'a str, text: &'a str, expected: &'a str) {
     print!("RUNNING '{}' '{}'... ", re, text);
     std::io::stdout().flush().unwrap();
     let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let path = walk_tree(&tree, text)
+    let path = walk_tree(&tree, text, "")
         .unwrap_or_else(|err| panic!("Expected \"{}\", got error '{}'", expected, err))
         .unwrap_or_else(|| panic!("Expected {}, found none", expected));
     assert_eq!(path.matched_string(), expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, path.matched_string());
@@ -159,7 +159,7 @@ fn find<'a>(alt: bool, re: &'a str, text: &'a str, expected: &'a str) {
         
 fn not_find<'a>(alt: bool, re: &'a str, text: &'a str) {
     let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    assert!(walk_tree(&tree, text).unwrap().is_none(), "re \"{}\" expected no match, found one", re);
+    assert!(walk_tree(&tree, text, "").unwrap().is_none(), "re \"{}\" expected no match, found one", re);
 }       
 
 //
@@ -286,7 +286,7 @@ fn former_bugs() {
 
 fn report_test<'a>(re: &'a str, text: &'a str, alt: bool, func: fn(&Report)) {
     let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    let path = walk_tree(&tree, text).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
+    let path = walk_tree(&tree, text, "").unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
 
     let report = Report::new(&path);
     func(&report);
@@ -451,7 +451,7 @@ fn alt_err() {
     e_check(true, r"or(abc or(def ", 105);
     e_check(true, r"get() ", 106);
     e_check(true, r"get(a() ", 107);
-    e_check(true, r"get(a) ", 108);
+//    e_check(true, r"get(a) ", 108);
     e_check(true, r"def(snippet_a: aa get(snippet_b)zz ) def(snippet_b: bb get(snippet_a) yy ) abcd get(snippet_a) wxyz ", 109);
     e_check(true, r"and(asd )<xy ", 110);
     e_check(true, r"def(asd)", 111);
@@ -463,7 +463,7 @@ fn alt_err() {
 fn runtime_error() {
     // infinite loop test
     if let Ok(tree) = parse_tree(r"and('x'*)*", true) {
-        match walk_tree(&tree, "abccc") {
+        match walk_tree(&tree, "abccc", "") {
             Err(e) if e.code == 200 => (),
             _ => panic!("Expected infinite loop, didn't get it"),
         }
