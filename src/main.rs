@@ -335,7 +335,7 @@ pub fn main() {
     let config = match Config::load() {
         Ok(cfg) => cfg,
         Err(msg) => {
-            println!("{}", msg);
+            eprintln!("{}", msg);
             return;
         }
     };
@@ -344,31 +344,28 @@ pub fn main() {
     set_trace(config.debug as usize);
     // execution starts
     
+    let mut count: usize = 0;
     match regexp::parse_tree(&config.re, "alternative".starts_with(&config.parser)) {
-        Err(error) => println!("{}", error),
+        Err(error) => eprintln!("{}", error),
         Ok(tree) => {
             if config.tree {
                 println!("--- Parse tree:");
                 tree.desc(0);
             }
             if let Err(msg) = Input::init(config.text.clone(), config.files.clone()) {
-                println!("{}", msg);
-                while let Err(m2) = Input::next() {  println!("{}", m2); }
+                eprintln!("{}", msg);
+                while let Err(m2) = Input::next() {  eprintln!("{}", m2); }
             }
             let mut start: usize = 0;
-            let mut count: usize = 0;
             let match_number: usize = if config.all { 0 } else { config.count as usize };
-            loop {
+            'main: loop {
                 match walk_tree(&tree, start) {
-                    Err(msg) => println!("{}", msg),
+                    Err(msg) => eprintln!("{}", msg),
                     Ok(None) => {
                         loop {
                             match Input::next() {
-                                Err(msg) => println!("{}", msg),
-                                Ok(false) => {
-                                    if count == 0 { println!("No match"); }
-                                    return;
-                                },
+                                Err(msg) => eprintln!("{}", msg),
+                                Ok(false) => { break 'main; },
                                 Ok(true) => { start = 0; break; },
                             }
                         }
@@ -397,6 +394,12 @@ pub fn main() {
                 if count == match_number { break; }
             }
         }
+    }
+    let file_count = Input::file_count();
+    if file_count > 0 {
+        eprintln!("Found {} instances in {} files", count, file_count);
+    } else {
+        eprintln!("Found {} instances", count);
     }
 }
 

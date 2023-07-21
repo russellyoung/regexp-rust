@@ -15,7 +15,7 @@
 use crate::regexp::*;
 use crate::set_trace;
 use crate::Config;
-use crate::regexp::walk::INPUT;
+use crate::regexp::walk::{INPUT,Input};
 use std::io;
 use std::io::Write;    
 use core::fmt::Debug;
@@ -171,6 +171,7 @@ impl Interactive {
 
     /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
     fn do_command(&mut self, input: &str, cmd_parse_tree: &Node) -> bool{
+        if let Err(msg) = Input::init(input.to_string(), Vec::new()) { println!("{}", msg); return false; }
         match walk_tree(cmd_parse_tree, 0) {
             Ok(Some(path)) => {
                 let report = Report::new(&path);
@@ -327,6 +328,7 @@ impl Interactive {
                     Err(err) => println!("Error parsing RE: {}", err.msg),
                     Ok(node) => {
                         set_trace(trace);
+                        if let Err(msg) = Input::init(text.to_string(), Vec::new()) { println!("{}", msg); return; }
                         match walk_tree(&node, 0) {
                             Err(msg) => println!("Error: {}", msg),
                             Ok(None) => println!("No match"),

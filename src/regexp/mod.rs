@@ -98,8 +98,25 @@ impl Clone for Node {
     }
 }    
 impl Node {
+    /// return TRUE if node has lazy eval
+    pub fn lazy(&self) -> bool { self.limits().lazy() }
+    /// return TRUE if node ignores case
+     pub fn no_case(&self) -> bool { self.limits().no_case() }
+                                 
+    pub fn limits(&self) -> &Limits {
+        match self {
+            Node::Chars(chars_node) => &chars_node.limits,
+            Node::Special(special_node) => &special_node.limits,
+            Node::Range(range_node) => &range_node.limits,
+            Node::And(and_node) => &and_node.limits,
+            Node::Or(or_node) => &or_node.limits,
+            Node::Def(def_node) => &def_node.limits,
+            Node::None => panic!("Node::None does not have Limits"),
+        }
+    }
+        
     /// Distributes a walk request to the proper XXXNode struct
-    fn walk<'a>(&'a self, matched: Matched) -> Result<walk::Path<'a>, Error> {
+    fn walk(&self, matched: Matched) -> Result<walk::Path, Error> {
         match self {
             Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, matched),
             Node::Special(special_node) => walk::SpecialStep::walk(special_node, matched),
@@ -380,7 +397,7 @@ impl Debug for CharsNode {
         };
         let limits_str = self.limits.simple_display();
         let name_limits = if self.name_outside {(&limits_str, &name)} else {(&name, &limits_str)};
-        write!(f, "CharsNode{}: \"{}\"{}{}", name, self.string, name_limits.0, name_limits.1)
+        write!(f, "CharsNode{}: \"{}\"{}{}{}", name, self.string, name_limits.0, name_limits.1, if self.limits.no_case() { " (no case)" } else { "" })
     }
 }
     
@@ -390,9 +407,15 @@ impl CharsNode {
     /// trickier because characters do not "clump" when attached to
     /// repetitions or OR nodes, so in some cases a **CharsNode** must be split.
     fn parse_node(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
+        if trace(2) { trace_enter("CHARS", chars); }
         let mut node = CharsNode::default();
         let mut count = 0;
-        if trace(2) { trace_enter("CHARS", chars); }
+        if let (Some('\\'), Some(c)) = chars.peek_2() {
+            if "cC".contains(c) {
+                chars.consume(2);
+                if c == 'c' { node.limits.options |= Limits::NO_CASE; }
+            }
+        }
         loop {
             match chars.peek_n(3)[..] {
                 [Some('\\'), Some(ch1), o_ch2] => {
@@ -413,20 +436,33 @@ impl CharsNode {
         }
         match count {
             0 => { return Ok(Node::None)},
-            1 => node.limits = Limits::parse(chars)?,
+            1 => {
+                let no_case = node.limits.options;
+                node.limits = Limits::parse(chars)?;
+                node.limits.options |= no_case;
+            }
             _ => {
                 if let (Some(ch0), Some(ch1)) = chars.peek_2() {
                     if "*?+{".contains(ch0) || (ch0 == '\\' && ch1 == '|') {
                         chars.put_back(node.string.pop().unwrap());
+                        if node.limits.no_case() {
+                            chars.put_back('c');
+                            chars.put_back('\\');
+                        }
                     }
                 }
             }
+        }
+        if node.limits.no_case() {
+            node.string = node.string.to_lowercase();
         }
         Ok(Node::Chars(node))
     }
     /// Checks a string to see if its head matches the contents of this node
     fn matches(&self, string: &str) -> Option<usize> {
-        if string.starts_with(self.string.as_str()) { Some(self.string.len()) }
+        if string.starts_with(self.string.as_str()) || (self.limits.no_case() && compare_caseless(&self.string, string)) {
+            Some(self.string.len())
+        }
         else { None }
     }
 
@@ -449,6 +485,18 @@ impl CharsNode {
     }
 }    
 
+fn compare_caseless(goal: &String, text: &str) -> bool {
+    if goal.len() > text.len() { return false; }
+    let mut iter1 = text.chars();
+    for ch in goal.chars() {
+        if let Some(ch1) = iter1.next() {
+            if let Some(lc1) = ch1.to_lowercase().next() {
+                if lc1 != ch { return false; }
+            }
+        } else { return false; }
+    }
+    true
+}
 impl Debug for SpecialNode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let name = match &self.named {
@@ -1264,10 +1312,10 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
 pub struct Limits {
     min: usize,
     max: usize,
-    lazy: bool,
+    options: usize
 }
 
-impl Default for Limits { fn default() -> Limits { Limits{min: 1, max: 1, lazy: false} } }
+impl Default for Limits { fn default() -> Limits { Limits{min: 1, max: 1, options: 0} } }
 
 impl std::fmt::Display for Limits {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1279,14 +1327,20 @@ impl std::fmt::Display for Limits {
             (min, EFFECTIVELY_INFINITE) => format!("{{{},}}", min),
             (min, max) => { if min == max { format!("{{{}}}", min) } else {format!("{{{},{}}}", min, max)} },
         };
-        if self.lazy { reps.push('?'); }
+        if self.lazy() { reps.push('?'); }
         f.write_str(reps.as_str())
     }
 }
 
 impl Limits {
+    pub const LAZY: usize = 0x1;
+    pub const NO_CASE: usize = 0x2;
+    
+    pub fn lazy(&self) -> bool { self.options & Limits::LAZY == Limits::LAZY }
+    pub fn no_case(&self) -> bool { self.options & Limits::NO_CASE == Limits::NO_CASE }
+    
     /// Display every Limit in a *{min, max}* format for debugging
-    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy {"?"} else {""})}
+    fn simple_display(&self) -> String { format!("{{{},{}}}{}", self.min, self.max, if self.lazy() {"?"} else {""})}
 
     /// returns a Limit struct parsed out from point. If none is there returns the default
     /// Like parse_if() but always returns a struct, using the default if there is none in the string
@@ -1301,9 +1355,9 @@ impl Limits {
             '{' => Limits::parse_ints(chars)?,
             _ => { chars.put_back(next); return Ok(Limits::default())}
         };
-        let lazy = chars.peek().unwrap_or('x') == '?';
-        if lazy { let _ = chars.next(); }
-        Ok(Limits{min, max, lazy})
+        let options = if chars.peek().unwrap_or('x') == '?' { Limits::LAZY } else { 0 };
+        if options > 0 { let _ = chars.next(); }
+        Ok(Limits{min, max, options})
     }
 
     /// helper function to parse an int at the current position of the RE being parsed
@@ -1340,7 +1394,7 @@ impl Limits {
     }
 
     /// gives the length of the initial walk: MAX for greedy, MIN for lazy
-    pub fn initial_walk_limit(&self) -> usize { if self.lazy {self.min} else { self.max}}
+    pub fn initial_walk_limit(&self) -> usize { if self.lazy() {self.min} else { self.max}}
 }
 
 //////////////////////////////////////////////////////////////////

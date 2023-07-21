@@ -72,7 +72,7 @@ fn limits_test() {
             assert!(limits.check(min + 1) == 0, "= min check failed for ({}, {}, {})", min, max, lazy);
             assert!(limits.check(max + 1) == 0, "= max check failed for ({}, {}, {})", min, max, lazy);
             assert!(limits.check(max + 2) > 0, "> max check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.lazy == lazy, "lazy check failed for ({}, {}, {})", min, max, lazy);
+            assert!(limits.lazy() == lazy, "lazy check failed for ({}, {}, {})", min, max, lazy);
         } else { panic!("failed parsing Limits"); }
     }
     assert!(chars.next().is_none(), "Failed to consume test string");
@@ -85,14 +85,16 @@ fn make_chars_string(string: &str) -> Node {
         Node::Chars(CharsNode{string: string.to_string(), limits: Limits::default(), named: None, name_outside: false})
 }
 fn make_chars_single(ch: char, min: usize, max: usize, lazy: bool) -> Node {
-    Node::Chars(CharsNode{string: ch.to_string(), limits: Limits{min, max, lazy}, named: None, name_outside: false})
+    let options = if lazy { Limits::LAZY } else { 0 };
+    Node::Chars(CharsNode{string: ch.to_string(), limits: Limits{min, max, options}, named: None, name_outside: false})
 }
 
 fn make_root (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
 
 fn make_and (min: usize, max: usize, lazy: bool, name: Option<&str>) -> Node {
+    let options = if lazy { Limits::LAZY } else { 0 };
     let named = name.map(|n| n.to_string());
-    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, lazy}, named, anchor: false, name_outside: false})
+    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, options}, named, anchor: false, name_outside: false})
 }
 fn make_or() -> Node {
     Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default(), named: None, name_outside: false})
@@ -225,7 +227,14 @@ fn unicode() {
     find(false, r"是很*好", "这是很很很好",  "是很很很好");
 }
 
-    
+#[test]
+fn no_case() {
+    not_find(false, "AbC", "xABC");
+    find(false, "\\cAbC", "xABC", "ABC");
+    find(false, "\\cAbC", "x你好AB你好abc", "abc");
+    find(false, "\\cabcd*", "xABCDdDz", "ABCDdD");
+}
+
 #[test]
 fn special_chars() {
     let mut x = LOCK.lock().unwrap();

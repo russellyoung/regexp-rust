@@ -158,7 +158,7 @@ impl<'a> Path<'a> {
         if trace(6) { trace_change_indent(1); }
         let limits = self.limits();
         let mut ret = false;
-        if limits.lazy {
+        if limits.lazy() {
             match self {
                 Path::Chars(steps) => {
                     if limits.check(steps.len() + 1) == 0 {
@@ -721,7 +721,7 @@ impl<'a> AndStep<'a> {
         }
         let limits = self.node.limits;
         let mut ret = true;
-        if limits.lazy {
+        if limits.lazy() {
             println!("TODO");
             // TODO
             ret = false;
@@ -964,16 +964,19 @@ impl Input {
     }
     pub fn next() -> Result<bool, Error> {
         let mut input = INPUT.lock().unwrap();
-        input.fileno += 1;
-        let fileno = input.fileno;
+        let fileno = input.fileno + 1;
         let files_len = if let Some(filenames) = &input.filenames { filenames.len() } else { 0 };
         if fileno < files_len {
             let file = if let Some(filenames) = &input.filenames { filenames[fileno].clone()} else {String::new()};
             input.init_file(file.as_str())?; //filenames[fileno].as_str())?;
+            input.fileno += 1;
             return Ok(true);
         }
         Ok(false)
     }
+
+    pub fn file_count() -> usize { INPUT.lock().unwrap().fileno }
+    
     //
     // Creation 
     //
@@ -1021,7 +1024,6 @@ impl Input {
     fn _extend(&mut self, size_bytes: usize) -> Result<(), Error> {
         if self.more_input && self.full_text.len() < size_bytes {
             let (string, more) = self.source.extend()?;
-            println!("READ {} CHARS, {}", string.len(), more);
             self.more_input = more;
             self.full_text.push_str(&string);
         }
@@ -1041,11 +1043,9 @@ impl Input {
     }
 
     pub fn abbrev(from: usize, num_chars: usize) -> String {
-        println!("into abbrev");
         let input = INPUT.lock().unwrap();
         let mut chars: String = input.full_text[from..].chars().take(num_chars).collect();
         if from + chars.len() < input.full_text.len() { chars.push_str("..."); }
-        println!("out of abbrev");
         chars
     }
 }
