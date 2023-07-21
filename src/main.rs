@@ -290,11 +290,12 @@ pub struct Config {
     /// find all instances instead of just first
     #[clap(short,long,default_value_t = false)]
     pub all: bool,
-    /// number of matches to find
+    /// number of matches to find. Overruled by --all if it appears
     #[clap(short, long, default_value_t = 1)]
     pub count: u32,
-    
-        
+    /// just print out matched strings, no details or names
+    #[clap(short,long,default_value_t = false)]
+    pub quiet: bool,
 }
 
 impl Config {
@@ -376,30 +377,37 @@ pub fn main() {
                             path.dump(0);
                             println!("--- End walk");
                         }
-                        let report = Report::new(&path);
-                        report.display(0);
-                        if config.named {
-                            for (name, v) in report.get_named() {
-                                if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v.last().unwrap().string()); }
-                                else {
-                                    println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
-                                    v.iter().for_each(|x| println!("    \"{}\"", x.string()));
+                        if config.quiet {
+                            let (from, to) = path.range();
+                            Input::apply(|x| println!("{}", x), from, Some(to));
+                        } else {
+                            let report = Report::new(&path);
+                            report.display(0);
+                            if config.named {
+                                for (name, v) in report.get_named() {
+                                    if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v.last().unwrap().string()); }
+                                    else {
+                                        println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
+                                        v.iter().for_each(|x| println!("    \"{}\"", x.string()));
+                                    }
                                 }
                             }
                         }
                         count += 1;
                         start = path.end();
+                        if count == match_number { break; }
                     }
                 }
-                if count == match_number { break; }
             }
         }
     }
-    let file_count = Input::file_count();
-    if file_count > 0 {
-        eprintln!("Found {} instances in {} files", count, file_count);
-    } else {
-        eprintln!("Found {} instances", count);
+    if !config.quiet {
+        let file_count = Input::file_count();
+        if file_count > 0 {
+            eprintln!("Found {} instances in {} files", count, file_count);
+        } else {
+            eprintln!("Found {} instances", count);
+        }
     }
 }
 

@@ -229,10 +229,22 @@ fn unicode() {
 
 #[test]
 fn no_case() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
     not_find(false, "AbC", "xABC");
     find(false, "\\cAbC", "xABC", "ABC");
     find(false, "\\cAbC", "x你好AB你好abc", "abc");
     find(false, "\\cabcd*", "xABCDdDz", "ABCDdD");
+}
+
+#[test]
+fn no_case_alt_parser() {
+    let mut x = LOCK.lock().unwrap();
+    *x += 1;
+    not_find(true, "AbC", "xABC");
+    find(true, "\\cAbC", "xABC", "ABC");
+    find(true, "\\cAbC", "x你好AB你好abc", "abc");
+    find(true, "\\cabcd*", "xABCDdDz", "ABCDdD");
 }
 
 #[test]

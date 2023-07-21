@@ -1048,5 +1048,15 @@ impl Input {
         if from + chars.len() < input.full_text.len() { chars.push_str("..."); }
         chars
     }
+
+    /// Applies a function to a substring of the current string.
+    /// References to the string cannot be passed back, so the only way to get a subtring of text would be
+    /// to make a copy. This gets around the problem by passing the function into a section where the substring is
+    /// accesible
+    pub fn apply<T>(f: fn(x: &str) -> T, from: usize, to: Option<usize>) -> T {
+        let input = INPUT.lock().unwrap();
+        let text  = if let Some(end) = to { &input.full_text[from..end] } else { &input.full_text[from..] };
+        f(text)
+    }
 }
 

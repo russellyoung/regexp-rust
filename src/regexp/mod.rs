@@ -969,6 +969,16 @@ impl CharsNode {
         let mut chars_node = CharsNode::default();
         let mut new_node: Node;
         let mut nodes = Vec::<Node>::new();
+        let mut no_case = 0usize;
+        if let (Some('\\'), Some(ch)) = chars.peek_2() {
+            if "cC".contains(ch) {
+                chars.consume(2);
+                if ch == 'c' {
+                    no_case = Limits::NO_CASE; 
+                    chars_node.limits.options |= no_case;
+                }
+            }
+        }
         loop {
             new_node = Node::None;
             match chars.peek_2() {
@@ -984,13 +994,16 @@ impl CharsNode {
                 (Some(_), _) => chars_node.string.push(chars.next().unwrap()),
                 (None, _) => { return Err(Error::make(102, "Unterminated character block"))},
             }
-            let limits = Limits::parse(chars)?;
+            let mut limits = Limits::parse(chars)?;
+            limits.options |= no_case;
             if limits.min*limits.max != 1 {
                 if new_node.is_none() {
                     if let Some(ch) = chars_node.string.pop() {
                         if !chars_node.string.is_empty() {
+                            if no_case > 0 { chars_node.string = chars_node.string.to_lowercase(); }
                             nodes.push(Node::Chars(chars_node));
                             chars_node = CharsNode::default();
+                            chars_node.limits.options |= no_case;
                         }
                         new_node = Node::Chars( CharsNode { string: String::from(ch), named: None, limits, name_outside: false});
                     } else {
@@ -1002,13 +1015,16 @@ impl CharsNode {
             }
             if !new_node.is_none() {
                 if !chars_node.string.is_empty() {
+                    if no_case > 0 { chars_node.string = chars_node.string.to_lowercase(); }
                     nodes.push(Node::Chars(chars_node));
                     chars_node = CharsNode::default();
+                    chars_node.limits.options |= no_case;
                 }
                 nodes.push(new_node);
             }
         }
         if !chars_node.string.is_empty() {
+            if no_case > 0 { chars_node.string = chars_node.string.to_lowercase(); }
             nodes.push(Node::Chars(chars_node));
         }
         Ok(match nodes.len() {
