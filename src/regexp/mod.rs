@@ -797,13 +797,10 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
 /// FILE is opened and read to get the string to search. If FILE also is empty (or if FILE = "-") then the string to
 /// search is read from stdin.
 
-pub fn walk_tree<'a>(tree: &'a Node, text: &str, file: &str) -> Result<Option<walk::Path<'a>>, Error> {
-    if !file.is_empty() { Input::from_file(file)? }
-    else if !text.is_empty() && text != "-" { Input::from_cmdline(text)? }
-    else { Input::from_stdin()? } 
+pub fn walk_tree<'a>(tree: &'a Node, from: usize) -> Result<Option<walk::Path<'a>>, Error> {
     trace_set_indent(0);
-    let mut start_pos = 0;
-    let mut char_start = 0;
+    let mut start_pos = from;
+    let mut char_start = INPUT.lock().unwrap().full_text[0..from].chars().count();
     // hey, optimization
     // deosn't save that much time but makes the trace debug easier to read
     let root = {if let Node::And(r) = tree { r } else { return Err(Error::make(5, "Root of tree should be Node::And (should not happen)")); }};
@@ -829,15 +826,15 @@ pub fn walk_tree<'a>(tree: &'a Node, text: &str, file: &str) -> Result<Option<wa
     }
 */
     loop {
-        if trace(1) {println!("\n==== WALK \"{}\" ====", &INPUT.lock().unwrap().full_text[start_pos..])}
+        if trace(1) { println!("\n==== WALK \"{}\" ====", Input::abbrev(start_pos, 10)); }
         let matched = Matched { start: start_pos, end: start_pos, char_start };
         let path = tree.walk(matched)?;
         if path.len() > 1 {
             if trace(1) { println!("--- Search succeeded ---") };
             return Ok(Some(path));
         }
+        if trace(1) { println!("==== WALK \"{}\": no match ====", Input::abbrev(start_pos, 10));}
         let input = INPUT.lock().unwrap();
-        if trace(1) {println!("==== WALK \"{}\": no match ====", &input.full_text[start_pos..])};
         if root.anchor { break; }
         if let Some(ch0) = input.full_text[start_pos..].chars().next() {
             start_pos += String::from(ch0).len();
@@ -1358,7 +1355,7 @@ impl Limits {
 #[derive(Debug,Clone)]
 pub struct Report {
     /// Match information for the step this Report is representing
-    matched: Matched,
+    pub matched: Matched,
     /// The name of the field: if None then the field should not be included in the Report tree, if Some("") it is included but
     /// unnamed, otherwise it is recorded with the given name
     pub name: Option<String>,
@@ -1580,7 +1577,6 @@ impl Error {
 }
 
 impl core::fmt::Display for Error {
-    // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "Error:{}: {}", self.code, self.msg)
     }

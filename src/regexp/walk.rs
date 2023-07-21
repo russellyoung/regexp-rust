@@ -917,7 +917,8 @@ impl Source {
                 while more && string.len() < Input::BLOCK_SIZE {
                     match stream.read_line(&mut string) {
                         std::io::Result::Err(error) => { return Err(Error::make(210, &error.to_string())); },
-                        std::io::Result::Ok(bytes) => more = bytes > 0,
+                        std::io::Result::Ok(0) => { more = false; break; },
+                        std::io::Result::Ok(_bytes) => (),
                     }
                 };
             },
@@ -941,7 +942,9 @@ pub struct Input {
     pub full_text: String,
     /// The source for getting more text
     source: Source,
-    more_input: bool
+    more_input: bool,
+    filenames: Option<Vec<String>>,
+    fileno: usize
 }
 
 //static mut INPUT: Input = Input::default();
@@ -950,59 +953,81 @@ pub static INPUT: Lazy<Mutex<Input>> = Lazy::new(|| Mutex::new(Input::default())
 impl Input {
     const BLOCK_SIZE: usize = 500;
 
+    pub fn init(text: String, files: Vec<String>) -> Result<(), Error> {
+        let mut input = INPUT.lock().unwrap();
+        if !text.is_empty() { input.init_cmdline(text)?; }
+        else if !files.is_empty() {
+            input.init_file(files[0].as_str())?;
+            input.filenames = Some(files);
+        } else { input.init_stdin()?; }
+        Ok(())
+    }
+    pub fn next() -> Result<bool, Error> {
+        let mut input = INPUT.lock().unwrap();
+        input.fileno += 1;
+        let fileno = input.fileno;
+        let files_len = if let Some(filenames) = &input.filenames { filenames.len() } else { 0 };
+        if fileno < files_len {
+            let file = if let Some(filenames) = &input.filenames { filenames[fileno].clone()} else {String::new()};
+            input.init_file(file.as_str())?; //filenames[fileno].as_str())?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
     //
     // Creation 
     //
     /// creates a text buffer getting the string from the command line
-    pub fn from_cmdline(text: &str) -> Result<(), Error> {
-        let mut input = INPUT.lock().unwrap();
-        input.source = Source::CmdLine;
-//        input.full_text = text;
-        input.full_text = text.to_string();
+    fn init_cmdline(&mut self, text: String) -> Result<(), Error> {
+        self.source = Source::CmdLine;
+        self.full_text = text;
         Ok(())
     }
 
     /// creates a text buffer getting the string from stdin
-    pub fn from_stdin() -> Result<(), Error> {
-        {
-            let mut input = INPUT.lock().unwrap();
-            input.source = Source::Stdin(BufReader::new(std::io::stdin()));
-            input.more_input = true;
-        }
-        Input::extend(1)?;  // any positive number forces a read
+    fn init_stdin(&mut self) -> Result<(), Error> {
+        self.source = Source::Stdin(BufReader::new(std::io::stdin()));
+        self.more_input = true;
+        self._extend(1)?;  // any positive number forces a read
         Ok(())
     }
 
     /// creates a text buffer getting the string from the given file
-    pub fn from_file(filename: &str) -> Result<(), Error> {
-        if filename == "-" { Input::from_stdin() }
+    fn init_file(&mut self, filename: &str) -> Result<(), Error> {
+        if trace(1) { println!("trying to open file {} for input", filename); }
+        if filename == "-" { self.init_stdin() }
         else {
             match std::fs::File::open(filename) {
-                Err(msg) => Err(Error::make(201, &msg.to_string())),
+                Err(err) => {
+                    let msg = format!("Error opening file {}: {}", filename, err);
+                    Err(Error::make(201, &msg))
+                },
                 Ok(file) => {
-                    {
-                        let mut input = INPUT.lock().unwrap();
-                        input.source = Source::File(BufReader::new(file));
-                        input.more_input = true;
-                    }
-                    Input::extend(1)?;  // any positive number forces a read
+                    self.source = Source::File(BufReader::new(file));
+                    self.more_input = true;
+                    self._extend(1)?;  // any positive number forces a read
                     Ok(())
                 }
             }
         }
     }
 
-    /// Checks that the input string is either fully read in or exceeds SIZE_BYTES in length
+    /// Public interface to _extend() method
     pub fn extend(size_bytes: usize) -> Result<(), Error> {
-        let mut input = INPUT.lock().unwrap();
-        if input.more_input && input.full_text.len() < size_bytes {
-            let (string, more) = input.source.extend()?;
-            input.more_input = more;
-            input.full_text.push_str(&string);
+        INPUT.lock().unwrap()._extend(size_bytes)
+    }
+
+    /// Checks that the input string is either fully read in or exceeds SIZE_BYTES in length
+    fn _extend(&mut self, size_bytes: usize) -> Result<(), Error> {
+        if self.more_input && self.full_text.len() < size_bytes {
+            let (string, more) = self.source.extend()?;
+            println!("READ {} CHARS, {}", string.len(), more);
+            self.more_input = more;
+            self.full_text.push_str(&string);
         }
         Ok(())
     }
-
+    
     // Like Input::extend() except prints any error and continues with the current string
     pub fn extend_quiet(size_bytes: usize) {
         if let Err(err) = Input::extend(size_bytes) {
@@ -1013,6 +1038,15 @@ impl Input {
     pub fn len() -> usize{
         let input = INPUT.lock().unwrap();
         input.full_text.len()
+    }
+
+    pub fn abbrev(from: usize, num_chars: usize) -> String {
+        println!("into abbrev");
+        let input = INPUT.lock().unwrap();
+        let mut chars: String = input.full_text[from..].chars().take(num_chars).collect();
+        if from + chars.len() < input.full_text.len() { chars.push_str("..."); }
+        println!("out of abbrev");
+        chars
     }
 }
 

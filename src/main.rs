@@ -200,7 +200,8 @@
 pub mod regexp;
 mod interactive;
 
-use crate::regexp::Report;
+use crate::regexp::{Report,walk_tree};
+use crate::regexp::walk::Input;
 use crate::interactive::Interactive;
 
 use core::sync::atomic::{AtomicIsize, AtomicUsize, AtomicU32, Ordering::{Acquire, Release, AcqRel}};
@@ -263,20 +264,19 @@ pub struct Config {
     /// Regular expression to search for (required unless --interactive)
     #[clap(default_value_t = String::from(""))]
     pub re: String,
-    /// String to search. ( --tree or --interactive)
-    #[clap(default_value_t = String::from(""))]
+    /// Files to search, file to search
+    #[clap(num_args=0..)]
+    pub files: Vec<String>, 
+    #[clap(short, long, default_value_t = String::from(""))]
     pub text: String,
     /// Parser to use. Will accept abbreviations. Currently supported are 'traditional' and 'alternative'.
     #[clap(short, long, default_value_t = String::from(PARSER_DEFAULT))]
     pub parser: String,
-    /// If given, file to search. "-" means read from stdin
-    #[clap(short, long, default_value_t = String::from(""))]
-    pub file: String, 
     /// Start up an interactive session
     #[clap(short, long, default_value_t = false)]
     pub interactive: bool,
     /// Prints the parsed regexp tree
-    #[clap(short, long, default_value_t = false)]
+    #[clap(short('T'), long, default_value_t = false)]
     pub tree: bool,
     /// Dumps the current path (the successful path, if called on the result of walk())
     #[clap(short, long, default_value_t = false)]
@@ -287,10 +287,14 @@ pub struct Config {
     /// Prints result for all named units
     #[clap(short, long, default_value_t = false, )]
     pub named: bool,
-    // length of text to display in the --debug output
-    /// When tracing the walk phase abbreviate the display of current string to ABBREV chars
-    #[clap(short, long, default_value_t = ABBREV_DEFAULT, value_parser=value_parser!(u32).range(1..))]
-    pub abbrev: u32,
+    /// find all instances instead of just first
+    #[clap(short,long,default_value_t = false)]
+    pub all: bool,
+    /// number of matches to find
+    #[clap(short, long, default_value_t = 1)]
+    pub count: u32,
+    
+        
 }
 
 impl Config {
@@ -301,14 +305,14 @@ impl Config {
         if !"alternative".starts_with(&config.parser) && ! "traditional".starts_with(&config.parser) {
             Err("Choices for parser are 'traditional' or 'alternative'")
         } else if config.interactive {
-            if !config.file.is_empty() { Err("FILE cannot be specified for interactive run") }
+            if !config.files.is_empty() { Err("FILE cannot be specified for interactive run") }
             else if config.tree { Err("TREE cannot be specified for interactive run") }
             else { Ok(config) }
         }
         else if config.re.is_empty() {
             Err("RE is required unless --interactive given")
-        } else if !config.text.is_empty() && !config.file.is_empty() {
-            Err("FILE cannot be given if RE is passed in")
+        } else if !config.text.is_empty() && !config.files.is_empty() {
+            Err("FILE cannot be given if search text is passed in")
         }
         else {Ok(config)}
     }
@@ -316,6 +320,7 @@ impl Config {
     pub fn alt_parser(&self) -> bool { "traditional".starts_with(&self.parser) }
         
 }
+
 /// Main function to run regexp as a function. It is called by
 /// > cargo run [-t] [-i] [-d LEVEL] [-a LENGTH] \[REGEXP\] \[TARGET\]
 /// where:
@@ -334,7 +339,6 @@ pub fn main() {
             return;
         }
     };
-    set_abbrev(config.abbrev);
     
     if config.interactive { return Interactive::new(config).run(); }
     set_trace(config.debug as usize);
@@ -346,30 +350,51 @@ pub fn main() {
             if config.tree {
                 println!("--- Parse tree:");
                 tree.desc(0);
-                return;
             }
-
-            match regexp::walk_tree(&tree, &config.text, &config.file) {
-                Ok(Some(path)) => {
-                    if config.walk {
-                        println!("--- Walk:");
-                        path.dump(0);
-                        println!("--- End walk");
-                    }
-                    let report = Report::new(&path);
-                    report.display(0);
-                    if config.named {
-                        for (name, v) in report.get_named() {
-                            if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v.last().unwrap().string()); }
-                            else {
-                                println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
-                                v.iter().for_each(|x| println!("    \"{}\"", x.string()));
+            if let Err(msg) = Input::init(config.text.clone(), config.files.clone()) {
+                println!("{}", msg);
+                while let Err(m2) = Input::next() {  println!("{}", m2); }
+            }
+            let mut start: usize = 0;
+            let mut count: usize = 0;
+            let match_number: usize = if config.all { 0 } else { config.count as usize };
+            loop {
+                match walk_tree(&tree, start) {
+                    Err(msg) => println!("{}", msg),
+                    Ok(None) => {
+                        loop {
+                            match Input::next() {
+                                Err(msg) => println!("{}", msg),
+                                Ok(false) => {
+                                    if count == 0 { println!("No match"); }
+                                    return;
+                                },
+                                Ok(true) => { start = 0; break; },
                             }
                         }
+                    },
+                    Ok(Some(path)) => {
+                        if config.walk {
+                            println!("--- Walk:");
+                            path.dump(0);
+                            println!("--- End walk");
+                        }
+                        let report = Report::new(&path);
+                        report.display(0);
+                        if config.named {
+                            for (name, v) in report.get_named() {
+                                if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v.last().unwrap().string()); }
+                                else {
+                                    println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
+                                    v.iter().for_each(|x| println!("    \"{}\"", x.string()));
+                                }
+                            }
+                        }
+                        count += 1;
+                        start = path.end();
                     }
                 }
-                Ok(None) => println!("No match"),
-                Err(error) => println!("{}", error)
+                if count == match_number { break; }
             }
         }
     }

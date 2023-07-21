@@ -171,7 +171,7 @@ impl Interactive {
 
     /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
     fn do_command(&mut self, input: &str, cmd_parse_tree: &Node) -> bool{
-        match walk_tree(cmd_parse_tree, input, &"") {
+        match walk_tree(cmd_parse_tree, 0) {
             Ok(Some(path)) => {
                 let report = Report::new(&path);
                 let words = report.get_by_name("words");
@@ -327,7 +327,7 @@ impl Interactive {
                     Err(err) => println!("Error parsing RE: {}", err.msg),
                     Ok(node) => {
                         set_trace(trace);
-                        match walk_tree(&node, text, "") {
+                        match walk_tree(&node, 0) {
                             Err(msg) => println!("Error: {}", msg),
                             Ok(None) => println!("No match"),
                             Ok(Some(path)) => {
