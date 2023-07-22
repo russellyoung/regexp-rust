@@ -547,7 +547,8 @@ impl<'a> CharsStep<'a> {
         let mut step = CharsStep {node: self.node, matched: self.matched.next(0)};
         Input::extend_quiet(step.matched.start + self.node.string.len() + 1);
         if step.matched.end == Input::len() { return None; }
-        if let Some(size) = step.node.matches(&INPUT.lock().unwrap().full_text[step.matched.start..]) {
+
+        if let Some(size) = Input::apply(|input| { step.node.matches(&input.full_text[step.matched.start..])}) {
             step.matched.move_end(size as isize);
             Some(step)
         } else { None }
@@ -589,8 +590,7 @@ impl<'a> SpecialStep<'a> {
     /// try to take a single step over a string of regular characters
     fn step(&self) -> Option<SpecialStep<'a>> {
         let mut step = SpecialStep {node: self.node, matched: self.matched.next(0)};
-//        if step.matched.end == step.matched.full_string.len() { return None; }
-        if let Some(size) = step.node.matches(&INPUT.lock().unwrap().full_text[step.matched.start..]) {
+        if let Some(size) = Input::apply(|input| { step.node.matches(&input.full_text[step.matched.start..])}) {
             step.matched.move_end(size as isize);
             Some(step)
         } else { None }
@@ -635,7 +635,7 @@ impl<'a> RangeStep<'a> {
         let mut step = RangeStep {node: self.node, matched: self.matched.next(0)};
         if step.matched.end == Input::len() { return None; }
         
-        if let Some(size) = step.node.matches(&INPUT.lock().unwrap().full_text[step.matched.start..]) {
+        if let Some(size) = Input::apply(|input| { step.node.matches(&input.full_text[step.matched.start..])}) {
             step.matched.move_end(size as isize);
             Some(step)
         } else { None }
@@ -871,14 +871,10 @@ impl Debug for Matched {
 impl Matched {
     /// Returns the length of the match in bytes
     pub fn len_bytes(&self) -> usize { self.end - self.start }
+
     /// Returns the length of the match in chars
-    pub fn len_chars(&self) -> usize { INPUT.lock().unwrap().full_text[self.start..self.end].chars().count() }
-    /// Returns pointer to the matching str slice
-//    pub fn string(&self) -> &str { &self.full_string[self.start..self.end] }
-    /// returns the remainder of the str starting from the match beginning
-//    fn unterminated(&self) -> &str { &self.full_string[self.start..] }
-    /// returns the remainder of the str starting from the match end
-//    fn remainder(&self) -> &str { &self.full_string[self.end..] }
+    pub fn len_chars(&self) -> usize { Input::apply(|input| input.full_text[self.start..self.end].chars().count()) }
+
     /// Builds a new Matched object immediately following the one pointed to by self
     fn next(&self, len: usize) -> Matched {
         Matched {start: self.end, end: self.end + len, char_start: self.char_start + self.len_chars() }
@@ -895,10 +891,11 @@ impl Matched {
     /// **abbrev()** is used in the pretty-print of steps: The display prints out the string at the start of the step. If it is too
     /// long it distracts from the other output. **abbrev** limits the length of the displayed string by replacing its end with "..."
     fn abbrev(&self) -> String {
-        let full_text = &INPUT.lock().unwrap().full_text;
-        let s = &full_text[self.start..].chars().take(crate::get_abbrev()).collect::<String>();
-        let dots = if s.len() < full_text.len() - self.start {"..."} else {""};
-        format!("\"{}\"{}", s, dots)
+        Input::apply(|input| {
+            let s = &input.full_text[self.start..].chars().take(crate::get_abbrev()).collect::<String>();
+            let dots = if s.len() < input.full_text.len() - self.start {"..."} else {""};
+            format!("\"{}\"{}", s, dots)
+        })
     }
 }
 
@@ -1076,14 +1073,16 @@ impl Input {
         chars
     }
 
-    /// Applies a function to a substring of the current string.
-    /// References to the string cannot be passed back, so the only way to get a subtring of text would be
-    /// to make a copy. This gets around the problem by passing the function into a section where the substring is
-    /// accesible
-    pub fn apply<T>(f: fn(x: &str) -> T, from: usize, to: Option<usize>) -> T {
-        let input = INPUT.lock().unwrap();
-        let text  = if let Some(end) = to { &input.full_text[from..end] } else { &input.full_text[from..] };
-        f(text)
+    /// Applies a mathod to the Input static instance. The instance cannot pass back pointers to any of its
+    /// contents, this way lets it be called without needing to allocate memory to pass return values
+    pub fn apply<T>(f: impl Fn(&Input) -> T) -> T {
+        let input = &INPUT.lock().unwrap();
+        f(input)
+    }
+
+    pub fn current_file(&self) -> Option<&str> {
+        if let Some(filenames) = &self.filenames { Some(filenames[self.fileno].as_str()) }
+        else { None }
     }
 }
 

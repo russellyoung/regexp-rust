@@ -389,7 +389,13 @@ pub fn main() {
                         }
                         if config.quiet {
                             let (from, to) = path.range();
-                            Input::apply(|x| println!("{}", x), from, Some(to));
+                            Input::apply(|input| {
+                                if let Some(filename) = input.current_file() {
+                                    println!("{} ({})", &input.full_text[from..to], filename);
+                                } else {
+                                    println!("{}", &input.full_text[from..to]);
+                                }
+                            });
                         } else {
                             let report = Report::new(&path);
                             report.display(0);
