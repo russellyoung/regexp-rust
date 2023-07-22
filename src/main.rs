@@ -152,7 +152,7 @@
 //!         Ok(node) => node,
 //!         Err(error) => { return Err(error); },
 //!     };
-//!     Input::init(text, Vec::new());      // sets the string to search to TEXT
+//!     Input::init_text(text);      // sets the string to search to TEXT
 //!     match regexp::walk_tree(&tree, 0) {
 //!         Ok(Some((path, char_start, bytes_start))) => {
 //!             return Ok(Some(Report::new(&path, char_start, bytes_start).display(0)))
@@ -164,10 +164,14 @@
 //!
 //!```
 //!
-//! If the TEXT argument to Input::init() is non-empty that text is searched. If empty, the second argument is a list of
-//! file names to be searched sequentlially. Finally, if that list is also empty, input is read from STDIN. The START
-//! argument to walk_tree() gives the position to start the search from. This is needed to find all instances, the regexp
-//! library only finds a single instance.
+//! 
+//! THere are 3 functions to choose from to initialize the buffer:
+//! Input::init_text() to search a text string, Input::init_files() to
+//! search the contents of a list of files, and input::init_stdin() to
+//! search a string from STDIN. The START argument to walk_tree()
+//! gives the position to start the search from. This is needed to
+//! find all instances, the regexp library only finds a single
+//! instance.
 //!
 //! #### Interactive
 //! There is also an interactive mode which allows storing of multiple regular expressions and text strings. From the help:
@@ -363,7 +367,10 @@ pub fn main() {
                 println!("--- Parse tree:");
                 tree.desc(0);
             }
-            if let Err(msg) = Input::init(config.text.clone(), config.files.clone()) {
+            if let Err(msg) =
+                if !config.text.is_empty() { Input::init_text(&config.text) }
+            else if !config.files.is_empty() { Input::init_files(&config.files) }
+            else { Input::init_stdin() } {
                 eprintln!("{}", msg);
                 while let Err(m2) = Input::next() {  eprintln!("{}", m2); }
             }

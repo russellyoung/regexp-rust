@@ -970,16 +970,54 @@ impl Input {
     /// if they are available
     const BLOCK_SIZE: usize = 500;
 
-    /// Initializes the static input. If TEXT is given that is searched directly, if empty FILES are accessed in
-    /// sequential order to search, and if no files are given then STDIN is used
-    pub fn init(text: String, files: Vec<String>) -> Result<(), Error> {
+    //
+    // Creation 
+    //
+    /// initializes text buffer to get the string from the command line
+    pub fn init_text(text: &str) -> Result<(), Error> {
+        if text.is_empty() { return Input::init_stdin(); }
         let mut input = INPUT.lock().unwrap();
-        if !text.is_empty() { input.init_cmdline(text)?; }
-        else if !files.is_empty() {
-            input.init_file(files[0].as_str())?;
-            input.filenames = Some(files);
-        } else { input.init_stdin()?; }
+        input.source = Source::CmdLine;
+        input.full_text = text.to_string();
         Ok(())
+    }
+
+    /// initializes text buffer to get the string from stdin
+    pub fn init_stdin() -> Result<(), Error> {
+        let mut input = INPUT.lock().unwrap();
+        input.source = Source::Stdin(BufReader::new(std::io::stdin()));
+        input.more_input = true;
+        input._extend(1)?;  // any positive number forces a read
+        Ok(())
+    }
+
+    /// initializes text buffer to get text from a list of files
+    pub fn init_files(filenames: &Vec<String>) -> Result<(), Error> {
+        if filenames.is_empty() { return Input::init_stdin(); }
+        let mut input = INPUT.lock().unwrap();
+        input.filenames = Some(filenames.clone());
+        input.fileno = 0;
+        input.use_file(filenames[0].as_str())
+    }
+    
+    /// sets up the text input to read from a new file
+    fn use_file(&mut self, filename: &str) -> Result<(), Error> {
+        if trace(1) { println!("trying to open file {} for input", filename); }
+        if filename == "-" { Input::init_stdin() }
+        else {
+            match std::fs::File::open(filename) {
+                Err(err) => {
+                    let msg = format!("Error opening file {}: {}", filename, err);
+                    Err(Error::make(201, &msg))
+                },
+                Ok(file) => {
+                    self.source = Source::File(BufReader::new(file));
+                    self.more_input = true;
+                    self._extend(1)?;  // any positive number forces a read
+                    Ok(())
+                }
+            }
+        }
     }
 
     /// Applies a mathod to the Input static instance. The instance cannot pass back pointers to any of its
@@ -1002,7 +1040,7 @@ impl Input {
         let files_len = if let Some(filenames) = &input.filenames { filenames.len() } else { 0 };
         if fileno < files_len {
             let file = if let Some(filenames) = &input.filenames { filenames[fileno].clone()} else {String::new()};
-            input.init_file(file.as_str())?; //filenames[fileno].as_str())?;
+            input.use_file(file.as_str())?; //filenames[fileno].as_str())?;
             input.fileno += 1;
             return Ok(true);
         }
@@ -1012,44 +1050,6 @@ impl Input {
     /// Returns the sequence number of the file currently supplying input
     pub fn file_count() -> usize { Input::apply(|input| input.fileno) }
     
-    //
-    // Creation 
-    //
-    /// creates a text buffer getting the string from the command line
-    fn init_cmdline(&mut self, text: String) -> Result<(), Error> {
-        self.source = Source::CmdLine;
-        self.full_text = text;
-        Ok(())
-    }
-
-    /// creates a text buffer getting the string from stdin
-    fn init_stdin(&mut self) -> Result<(), Error> {
-        self.source = Source::Stdin(BufReader::new(std::io::stdin()));
-        self.more_input = true;
-        self._extend(1)?;  // any positive number forces a read
-        Ok(())
-    }
-
-    /// creates a text buffer getting the string from the given file
-    fn init_file(&mut self, filename: &str) -> Result<(), Error> {
-        if trace(1) { println!("trying to open file {} for input", filename); }
-        if filename == "-" { self.init_stdin() }
-        else {
-            match std::fs::File::open(filename) {
-                Err(err) => {
-                    let msg = format!("Error opening file {}: {}", filename, err);
-                    Err(Error::make(201, &msg))
-                },
-                Ok(file) => {
-                    self.source = Source::File(BufReader::new(file));
-                    self.more_input = true;
-                    self._extend(1)?;  // any positive number forces a read
-                    Ok(())
-                }
-            }
-        }
-    }
-
     /// Public interface to _extend() method, tries to read into string to search so its length is greater than or equal to SIZE_BYTES
     pub fn extend(size_bytes: usize) -> Result<(), Error> {
         INPUT.lock().unwrap()._extend(size_bytes)
