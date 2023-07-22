@@ -118,7 +118,7 @@ impl<'a> Path<'a> {
     /// For debug use: allocates String
     pub fn matched_string(&'a self) -> String {
         let (first, last) = self.first_last();
-        INPUT.lock().unwrap().full_text[first.start..last.end].to_string()
+        Input::apply(|input| input.full_text[first.start..last.end].to_string())
     }
 
     /// returns ths **Limit** object for the Path
@@ -864,7 +864,7 @@ pub struct Matched {
 
 impl Debug for Matched {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "match \"{}\" [{}-{})", &INPUT.lock().unwrap().full_text[self.start..self.end], self.start, self.end, )
+        Input::apply_mut(|input| write!(f, "match \"{}\" [{}-{})", &input.full_text[self.start..self.end], self.start, self.end, ))
     }
 }
 
@@ -961,8 +961,8 @@ pub struct Input {
     fileno: usize
 }
 
-//static mut INPUT: Input = Input::default();
-pub static INPUT: Lazy<Mutex<Input>> = Lazy::new(|| Mutex::new(Input::default()));
+/// Single static value holding input text to search. All access to this shoulld use Input::apply() or Input::apply_mut()
+static INPUT: Lazy<Mutex<Input>> = Lazy::new(|| Mutex::new(Input::default()));
 
 impl Input {
     /// An indication of the block size to read in for extending input. The number is not exact since
@@ -982,6 +982,19 @@ impl Input {
         Ok(())
     }
 
+    /// Applies a mathod to the Input static instance. The instance cannot pass back pointers to any of its
+    /// contents, this way lets it be called without needing to allocate memory to pass return values
+    pub fn apply<T>(f: impl Fn(&Input) -> T) -> T {
+        let input = &INPUT.lock().unwrap();
+        f(input)
+    }
+
+    /// Like Input::apply() but allows functions with muts
+    pub fn apply_mut<T>(mut f: impl FnMut(&Input) -> T) -> T {
+        let input = &INPUT.lock().unwrap();
+        f(input)
+    }
+
     /// Moves to the next input source, a no-op for Cmdline and Stdin input. Returns TRUE if there is another input source, else FALSE
     pub fn next() -> Result<bool, Error> {
         let mut input = INPUT.lock().unwrap();
@@ -997,7 +1010,7 @@ impl Input {
     }
 
     /// Returns the sequence number of the file currently supplying input
-    pub fn file_count() -> usize { INPUT.lock().unwrap().fileno }
+    pub fn file_count() -> usize { Input::apply(|input| input.fileno) }
     
     //
     // Creation 
@@ -1060,10 +1073,7 @@ impl Input {
     }
 
     /// Returns the length of the current search text. It may be there is more text that still needs to be read in.
-    pub fn len() -> usize{
-        let input = INPUT.lock().unwrap();
-        input.full_text.len()
-    }
+    pub fn len() -> usize { Input::apply(|input| input.full_text.len()) }
 
     /// For debugging, returns a String of the substring beginning at byte position FROM consisting of NUM_CHARS characters
     pub fn abbrev(from: usize, num_chars: usize) -> String {
@@ -1071,13 +1081,6 @@ impl Input {
         let mut chars: String = input.full_text[from..].chars().take(num_chars).collect();
         if from + chars.len() < input.full_text.len() { chars.push_str("..."); }
         chars
-    }
-
-    /// Applies a mathod to the Input static instance. The instance cannot pass back pointers to any of its
-    /// contents, this way lets it be called without needing to allocate memory to pass return values
-    pub fn apply<T>(f: impl Fn(&Input) -> T) -> T {
-        let input = &INPUT.lock().unwrap();
-        f(input)
     }
 
     pub fn current_file(&self) -> Option<&str> {

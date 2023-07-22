@@ -15,7 +15,7 @@
 use crate::regexp::*;
 use crate::set_trace;
 use crate::Config;
-use crate::regexp::walk::{INPUT,Input};
+use crate::regexp::walk::Input;
 use std::io;
 use std::io::Write;    
 use core::fmt::Debug;
@@ -421,8 +421,8 @@ fn input_substring (words: &Vec<& Report>, from: usize, to: usize) -> String {
     if from >= len { "".to_string() }
     else {
         let r0 = words[from]; 
-        let r1 = if to < len { words[to] } else { words[len - 1] }; 
-        INPUT.lock().unwrap().full_text[r0.byte_pos().0..r1.byte_pos().1].to_string()
+        let r1 = if to < len { words[to] } else { words[len - 1] };
+        Input::apply(|input| input.full_text[r0.byte_pos().0..r1.byte_pos().1].to_string())
     }
 }
 

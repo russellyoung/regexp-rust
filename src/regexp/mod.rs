@@ -30,7 +30,7 @@ mod tests;
 
 use std::str::Chars;
 use crate::{trace, trace_indent, trace_change_indent, trace_set_indent, TAB_SIZE};
-use crate::regexp::walk::{Matched,INPUT,Input};
+use crate::regexp::walk::{Matched,Input};
 use core::fmt::Debug;
 use std::collections::HashMap;
 use home;
@@ -1451,7 +1451,7 @@ impl<'a> Report {
     /// Gets the string matched by this unit
     // TODO: Replace this with inline function that does not allocate?
     pub fn string(&self) -> String {
-        INPUT.lock().unwrap().full_text[self.matched.start..self.matched.end].to_string()
+        Input::apply(|input| input.full_text[self.matched.start..self.matched.end].to_string())
     }
     /// Gets the start and end position of the match in bytes
     pub fn byte_pos(&self) -> (usize, usize) { (self.matched.start, self.matched.end) }
@@ -1467,9 +1467,9 @@ impl<'a> Report {
         let name_str = { if let Some(name) = &self.name { format!("<{}> ", name) } else { "".to_string() }};
         print!("{0:1$}", "", indent);
         let len_chars = self.matched.len_chars();
-        let full_text = &INPUT.lock().unwrap().full_text;
-        println!("\"{}\" {}chars start {}, length {}; bytes start {}, length {}",
-                 &full_text[self.matched.start..self.matched.end], name_str, self.matched.char_start, len_chars, self.matched.start, self.matched.end - self.matched.start);
+        Input::apply(|input| 
+                     println!("\"{}\" {}chars start {}, length {}; bytes start {}, length {}",
+                              &input.full_text[self.matched.start..self.matched.end], name_str, self.matched.char_start, len_chars, self.matched.start, self.matched.end - self.matched.start));
         self.subreports.iter().for_each(move |r| r.display(indent + TAB_SIZE));
     }
 
