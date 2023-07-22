@@ -133,7 +133,7 @@ impl<'a> Path<'a> {
         }
     }
 
-    // intended for internal use
+    // intended for internal use, gets the first and last steps in the path
     fn first_last(&self) -> (&Matched, &Matched) {
         match self {
             Path::Chars(steps) =>    (&steps[0].matched, &steps.last().unwrap().matched),
@@ -862,13 +862,13 @@ pub struct Matched {
     pub char_start: usize,
 }
 
-impl<'a> Debug for Matched {
+impl Debug for Matched {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "match \"{}\" [{}-{})", &INPUT.lock().unwrap().full_text[self.start..self.end], self.start, self.end, )
     }
 }
 
-impl<'a> Matched {
+impl Matched {
     /// Returns the length of the match in bytes
     pub fn len_bytes(&self) -> usize { self.end - self.start }
     /// Returns the length of the match in chars
@@ -902,9 +902,18 @@ impl<'a> Matched {
     }
 }
 
-/// Used to extend the buffered search text when needed
+/// **Source** holds information on where the input text comes from
 #[derive(Default)]
-enum Source { #[default] None, CmdLine, Stdin(BufReader<std::io::Stdin>), File(BufReader<std::fs::File>) }
+enum Source {
+    /// No input source has been set
+    #[default] None,
+    /// text is passed in as a string
+    CmdLine,
+    /// text should be read from STDIN
+    Stdin(BufReader<std::io::Stdin>),
+    /// files are read sequentlaiiy to get the input text
+    File(BufReader<std::fs::File>)
+}
 
 impl Source {
     /// Extends by unit of BLOCK_SIZE if possible. Returns String to add along with boolean telling if the input is exhausted, or program error format
@@ -936,14 +945,22 @@ impl Source {
     }
 }
 
+/// **Input** has a single static instance that holds the input text, and extends it as necessary by reading from stdin or files.
+/// Using a static instance is not ideal, but seems to be the best solution. The program as originally written only took text
+/// in the command and did not allow extending it from other sources. If rewriting from scratch perhaps having a common state
+/// variable passed around might make more sense, though I did look at that and found that it was not simple since it had to
+/// be mutable almost everywhere so it could be extended when needed, which severely limited the way it could be used. By
+/// making it static the current input string is available everywhere to reference and can be updated as needed.
 #[derive(Default)]
 pub struct Input {
     /// The text currently in the buffer
     pub full_text: String,
     /// The source for getting more text
     source: Source,
+    /// flag cleared when the input source is exhausted
     more_input: bool,
     filenames: Option<Vec<String>>,
+    /// the current file in the file list being read, 0 if input is not from file
     fileno: usize
 }
 
@@ -951,8 +968,13 @@ pub struct Input {
 pub static INPUT: Lazy<Mutex<Input>> = Lazy::new(|| Mutex::new(Input::default()));
 
 impl Input {
+    /// An indication of the block size to read in for extending input. The number is not exact since
+    /// input is read line-by-line, but it is guaranteed that each extend() call adds at least this many bytes
+    /// if they are available
     const BLOCK_SIZE: usize = 500;
 
+    /// Initializes the static input. If TEXT is given that is searched directly, if empty FILES are accessed in
+    /// sequential order to search, and if no files are given then STDIN is used
     pub fn init(text: String, files: Vec<String>) -> Result<(), Error> {
         let mut input = INPUT.lock().unwrap();
         if !text.is_empty() { input.init_cmdline(text)?; }
@@ -962,6 +984,8 @@ impl Input {
         } else { input.init_stdin()?; }
         Ok(())
     }
+
+    /// Moves to the next input source, a no-op for Cmdline and Stdin input. Returns TRUE if there is another input source, else FALSE
     pub fn next() -> Result<bool, Error> {
         let mut input = INPUT.lock().unwrap();
         let fileno = input.fileno + 1;
@@ -975,6 +999,7 @@ impl Input {
         Ok(false)
     }
 
+    /// Returns the sequence number of the file currently supplying input
     pub fn file_count() -> usize { INPUT.lock().unwrap().fileno }
     
     //
@@ -1015,7 +1040,7 @@ impl Input {
         }
     }
 
-    /// Public interface to _extend() method
+    /// Public interface to _extend() method, tries to read into string to search so its length is greater than or equal to SIZE_BYTES
     pub fn extend(size_bytes: usize) -> Result<(), Error> {
         INPUT.lock().unwrap()._extend(size_bytes)
     }
@@ -1030,18 +1055,20 @@ impl Input {
         Ok(())
     }
     
-    // Like Input::extend() except prints any error and continues with the current string
+    /// Like Input::extend() except prints any error and continues with the current string
     pub fn extend_quiet(size_bytes: usize) {
         if let Err(err) = Input::extend(size_bytes) {
             println!("Input error: {:?}", err);
         }
     }
 
+    /// Returns the length of the current search text. It may be there is more text that still needs to be read in.
     pub fn len() -> usize{
         let input = INPUT.lock().unwrap();
         input.full_text.len()
     }
 
+    /// For debugging, returns a String of the substring beginning at byte position FROM consisting of NUM_CHARS characters
     pub fn abbrev(from: usize, num_chars: usize) -> String {
         let input = INPUT.lock().unwrap();
         let mut chars: String = input.full_text[from..].chars().take(num_chars).collect();

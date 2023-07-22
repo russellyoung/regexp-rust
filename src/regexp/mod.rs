@@ -485,6 +485,8 @@ impl CharsNode {
     }
 }    
 
+/// Checks if a string matches ignoring case. This is a little tricky because strings cannot be
+/// split in mid-UTF8
 fn compare_caseless(goal: &String, text: &str) -> bool {
     if goal.len() > text.len() { return false; }
     let mut iter1 = text.chars();
@@ -845,7 +847,7 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
 /// FILE is opened and read to get the string to search. If FILE also is empty (or if FILE = "-") then the string to
 /// search is read from stdin.
 
-pub fn walk_tree<'a>(tree: &'a Node, from: usize) -> Result<Option<walk::Path<'a>>, Error> {
+pub fn walk_tree(tree: & Node, from: usize) -> Result<Option<walk::Path<'_>>, Error> {
     trace_set_indent(0);
     let mut start_pos = from;
     let mut char_start = INPUT.lock().unwrap().full_text[0..from].chars().count();
@@ -1326,8 +1328,11 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
 /// passed in is USIZE, and needs to handle a < 0 condition when 0 reps does not match). However this is
 /// handled it causes confusion somewhere, this way handling is limited to the check() method.
 pub struct Limits {
+    /// Minimum number of occurences to allow
     min: usize,
+    /// Maximum number of occurences to allow
     max: usize,
+    /// Holds bits for caseless search and lazy evaluation
     options: usize
 }
 
@@ -1351,8 +1356,10 @@ impl std::fmt::Display for Limits {
 impl Limits {
     pub const LAZY: usize = 0x1;
     pub const NO_CASE: usize = 0x2;
-    
+
+    /// returns boolean determining if the node should be evaluated lazily or not
     pub fn lazy(&self) -> bool { self.options & Limits::LAZY == Limits::LAZY }
+    /// returns boolean determining if the node should ignore case on the match or not
     pub fn no_case(&self) -> bool { self.options & Limits::NO_CASE == Limits::NO_CASE }
     
     /// Display every Limit in a *{min, max}* format for debugging

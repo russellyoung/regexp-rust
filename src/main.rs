@@ -39,8 +39,10 @@
 //! Any repetition code can be directed to use a lazy algorithm by suffixing it with '?'. (ie "*?, +?, ??, etc.) Lazy
 //! evaluation first matches the smalles number allowed and adds extra instances if allowed as needed.
 //!
+//! Putting "\c" at the front of a string ignores case for that match only.
+//!
 //! ## Alternate RE syntax
-
+//!
 //! In addition to the standard(ish) regular expressions, there is an alternative style regular expression syntax supported.
 //! While writing the original parser I noticed a few things: first, the main difficulty of the sntax was in handling special
 //! cases required for the quirky traditional syntax (examples: infix operator for **or**, characters distributing individually
@@ -118,22 +120,25 @@
 //! #### Command line
 //! From the help:
 //! 
-//! Usage: regexp \[OPTIONS\] \[RE\] \[TEXT\]  
-//!   
-//! Arguments:  
-//!   \[RE\]    Regular expression to search for (required unless --interactive) \[default: \]  
-//!   \[TEXT\]  String to search (required, unless --tree or --interactive) \[default: \]  
-//!   
-//! Options:  
-//!   -p, --parser \<PARSER\>  Parser to use. Will accept abbreviations. Currently supported are 'traditional' and 'alternative' \[default: traditional\]  
-//!   -i, --interactive      Start up an interactive session  
-//!   -t, --tree             Prints the parsed regexp tree  
-//!   -w, --walk             Dumps the current path (the successful path, if called on the result of walk())  
-//!   -d, --debug \<DEBUG\>    Prints debug information. 1 - 8 give progressively more data \[default: 0\]  
-//!   -n, --named            Prints result for all named units  
-//!   -a, --abbrev \<ABBREV\>  When tracing the walk phase abbreviate the display of current string to LENGTH chars \[default: 5\]  
-//!   -h, --help             Print help  
-//!   -V, --version          Print version  
+//! Usage: regexp \[OPTIONS\] \[RE\] \[FILES\]...
+//! 
+//! Arguments:
+//!   \[RE\]        Regular expression to search for (required unless --interactive) \[default: ""\]
+//!   \[FILES\]...  Files to search, file to search
+//! 
+//! Options:
+//!   -t, --text \<TEXT\>      \[default: "" \]
+//!   -p, --parser \<PARSER\>  Parser to use. Will accept abbreviations. Currently supported are 'traditional' and 'alternative' [default: traditional]
+//!   -i, --interactive      Start up an interactive session
+//!   -T, --tree             Prints the parsed regexp tree
+//!   -w, --walk             Dumps the current path (the successful path, if called on the result of walk())
+//!   -d, --debug \<DEBUG\>    Prints debug information. 1 - 8 give progressively more data [default: 0]
+//!   -n, --named            Prints result for all named units
+//!   -a, --all              find all instances instead of just first
+//!   -c, --count \<COUNT\>    number of matches to find. Overruled by --all if it appears [default: 1]
+//!   -q, --quiet            just print out matched strings, no details or names
+//!   -h, --help             Print help
+//!   -V, --version          Print version
 //!
 //! #### API
 //! A search has three phases. The first phase parses the regular expression to get a regular expression tree, which is the map needed to
@@ -147,7 +152,8 @@
 //!         Ok(node) => node,
 //!         Err(error) => { return Err(error); },
 //!     };
-//!     match regexp::walk_tree(&tree, text, file) {
+//!     Input::init(text, Vec::new());      // sets the string to search to TEXT
+//!     match regexp::walk_tree(&tree, 0) {
 //!         Ok(Some((path, char_start, bytes_start))) => {
 //!             return Ok(Some(Report::new(&path, char_start, bytes_start).display(0)))
 //!         },
@@ -158,8 +164,10 @@
 //!
 //!```
 //!
-//! The TEXT argument to walk_tree() is the text to search, if it is non-empty. If it is empty the FILE argument gives
-//! a file name to read for the input text. If both are empty, or TEXT is empty and FILE is "-" then the input is read from stdin.
+//! If the TEXT argument to Input::init() is non-empty that text is searched. If empty, the second argument is a list of
+//! file names to be searched sequentlially. Finally, if that list is also empty, input is read from STDIN. The START
+//! argument to walk_tree() gives the position to start the search from. This is needed to find all instances, the regexp
+//! library only finds a single instance.
 //!
 //! #### Interactive
 //! There is also an interactive mode which allows storing of multiple regular expressions and text strings. From the help:
@@ -323,15 +331,17 @@ impl Config {
 }
 
 /// Main function to run regexp as a function. It is called by
-/// > cargo run [-t] [-i] [-d LEVEL] [-a LENGTH] \[REGEXP\] \[TARGET\]
+/// > cargo run [-t] [-i] [-d LEVEL] [-a LENGTH] \[REGEXP\] \[-t TARGET | FILES...\]
 /// where:
 ///  - **REGEXP**: a regular expression. This is always required excep if _-i_ is given
 ///  - **TARGET**: a string to search with *REGEXP*. It is required unless _-i_ or _-t_ are given
+///  - **FILES**: a list of files to search. If empty or the first file is "-" STDIN is used
 ///  - **-t** (**--tree**): just parse the regexp to make the regexp tree and print it out in a user friendly format
 ///  - **-i** (**--interactive**): run an interactive session. This lets the user enter regexps and targets and run them to see the
 /// results, as well as viewing the details of the tree parse or tree walk phases.
 ///  - **-d LEVEL** (**--debug LEVEL**): set the debug level to LEVEL. The default level is 0, good values to try are 1, 2, or 3.
-///  - **-a LENGTH** (**--abbrev LENGTH**): When tracing the walk phase abbreviate the display of current string to LENGTH chars
+///  - **-a** (**--all**): Finds all instances in the input string. By default only the first is found.
+///  - **-c COUNT** (**--count COUNT**): finds the first COUNT occurences and exits. The default is 1, and this is overruled by the **-a** switch
 pub fn main() {
     let config = match Config::load() {
         Ok(cfg) => cfg,

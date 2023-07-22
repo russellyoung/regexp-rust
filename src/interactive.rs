@@ -228,7 +228,7 @@ impl Interactive {
             },
             "alternative" | "traditional" => {
                 if words.len() == 2 {println!("'re {}' requires regular expression", subcmd);}
-                else { self.res.push(RegExp {re: input_substring(words, 2, 1000).to_string(), alt_parser: subcmd == "alternative"}); }
+                else { self.res.push(RegExp {re: input_substring(words, 2, 1000), alt_parser: subcmd == "alternative"}); }
             },
             "ambiguous" => println!("ambiguous subcommand"),
             _ => {
@@ -267,7 +267,7 @@ impl Interactive {
                     }
                 } else { println!("text pop [number]"); }
             },
-            "set" => self.texts.push(input_substring(words, 2, 1000).to_string()),
+            "set" => self.texts.push(input_substring(words, 2, 1000)),
             "history" | "list" => {
                 if len == 0 { println!("No saved texts"); }
                 else { for i in 0..len { println!("  {}: \"{}\"", i, self.texts[len - i - 1]); } }
@@ -280,7 +280,7 @@ impl Interactive {
                         println!("Using {:?}", text);
                         self.texts.push(text);
                     }
-                } else { self.texts.push(input_substring(words, 1, 1000).to_string()); }
+                } else { self.texts.push(input_substring(words, 1, 1000)); }
             },
         }
     }
@@ -416,7 +416,7 @@ fn get_command(candidates: &'static [&str], cmd: &str) -> &'static str {
 }
 
 /// gets the raw input string from the user input, retaining all whitespace characters
-fn input_substring<'a> (words: &Vec<&'a Report>, from: usize, to: usize) -> String {
+fn input_substring (words: &Vec<& Report>, from: usize, to: usize) -> String {
     let len = words.len();
     if from >= len { "".to_string() }
     else {

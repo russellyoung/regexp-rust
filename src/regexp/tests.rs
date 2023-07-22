@@ -238,7 +238,7 @@ fn no_case() {
 }
 
 #[test]
-fn no_case_alt_parser() {
+fn alt_no_case() {
     let mut x = LOCK.lock().unwrap();
     *x += 1;
     not_find(true, "AbC", "xABC");
