@@ -3,13 +3,14 @@
 //! RE tree) is represented by a **Step** object. The **Step**s are grouped in vectors to form **Path**s, each of which represents
 //! a walk through the tree. When a **Path** reaches the end of the tree successfully it means the search has succeeded and that
 //! **Path* is returned, representing a matched string, so it can generate a **Report** giving its route.
-use super::*;
-use crate::{trace, trace_indent, trace_change_indent};
+use crate::regexp::{trace, trace_indent, trace_change_indent, trace_set_indent, Error,Report};
+use crate::tree::*;
 use std::io::BufReader;
 use std::io::BufRead;
 //use lazy_static::lazy_static;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
+use core::fmt::Debug;
 
 /// simplifies code a little by removing the awkward accessing of the last element in a vector
 
@@ -847,6 +848,61 @@ impl<'a> OrStep<'a> {
     }
 }
 
+/// This is the entrypoint to the phase 2, (tree walk) processing. It
+/// is put in this package to make it easier available, since
+/// logically it is part of the regexp search functionality.
+/// If TEXT is non-empty then the string TEXT is searched for the RE represented by TREE. If TEXT is empty then
+/// FILE is opened and read to get the string to search. If FILE also is empty (or if FILE = "-") then the string to
+/// search is read from stdin.
+
+pub fn walk_tree(tree: & Node, from: usize) -> Result<Option<Path<'_>>, Error> {
+    trace_set_indent(0);
+    let mut start_pos = from;
+    let mut char_start = Input::apply(|input| input.full_text[0..from].chars().count());
+    // hey, optimization
+    // deosn't save that much time but makes the trace debug easier to read
+    let root = {if let Node::And(r) = tree { r } else { return Err(Error::make(5, "Root of tree should be Node::And (should not happen)")); }};
+    /*
+    // If the initial node is a character this optimizes by searching for the initial string. It is commented out
+    // because it doesn't account for FILE or STDIN input
+    if !root.anchor {
+        if let Node::Chars(chars_node) = &root.nodes[0] {
+            if chars_node.limits.min > 0 {
+                let input = INPUT.lock().unwrap();
+                match input.full_text.find(chars_node.string.as_str()) {
+                    Some(offset) => {
+                        if offset > 0 {
+                            if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", chars_node.string, offset); }
+                            start_pos = offset;
+                            char_start = input.full_text[0..offset].chars().count();
+                        }
+                    },
+                    None => { return Ok(None); }
+                }
+            }
+        }
+    }
+*/
+    loop {
+        if trace(1) { println!("\n==== WALK \"{}\" ====", Input::abbrev(start_pos, 10)); }
+        let matched = Matched { start: start_pos, end: start_pos, char_start };
+        let path = tree.walk(matched)?;
+        if path.len() > 1 {
+            if trace(1) { println!("--- Search succeeded ---") };
+            return Ok(Some(path));
+        }
+        if trace(1) { println!("==== WALK \"{}\": no match ====", Input::abbrev(start_pos, 10));}
+        if root.anchor { break; }
+        if let Some(ch0) = Input::apply(|input| input.full_text[start_pos..].chars().next()) {
+            start_pos += String::from(ch0).len();
+            char_start += 1;
+        } else {
+            break;
+        }
+    }
+    Ok(None)
+}
+
 /// **Matched** is used to keep track of the state of the search
 /// string. It holds the whole string as well as offset to the
 /// beginning and end of the substring matched by its owning **Step**.
@@ -886,16 +942,6 @@ impl Matched {
     /// Moves the end of Matched to the new position
     fn set_end(&mut self, new_end: usize) {
         self.end = new_end;
-    }
-
-    /// **abbrev()** is used in the pretty-print of steps: The display prints out the string at the start of the step. If it is too
-    /// long it distracts from the other output. **abbrev** limits the length of the displayed string by replacing its end with "..."
-    fn abbrev(&self) -> String {
-        Input::apply(|input| {
-            let s = &input.full_text[self.start..].chars().take(crate::get_abbrev()).collect::<String>();
-            let dots = if s.len() < input.full_text.len() - self.start {"..."} else {""};
-            format!("\"{}\"{}", s, dots)
-        })
     }
 }
 

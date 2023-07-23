@@ -1,5 +1,6 @@
-use crate::regexp::*;
-use crate::regexp::walk::Input;
+use crate::regexp::Report;
+use crate::tree::*;
+use crate::walk::{walk_tree,Input};
 use std::io::Write;
 use std::sync::Mutex;
 
@@ -16,7 +17,7 @@ pub static LOCK: Mutex<usize> = Mutex::new(0);
 fn peekable() {
     let mut x = LOCK.lock().unwrap();
     *x += 1;
-    let mut chars = Peekable::new("abcde");
+    let mut chars = crate::tree::Peekable::new("abcde");
     chars.push('z');
     assert_eq!(Some('a'), chars.next());
     assert_eq!(Some('b'), chars.peek());

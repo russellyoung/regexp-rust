@@ -24,13 +24,10 @@
 /// the tree, next use **walk_tree()** to get the results.
 // TODO:
 // - refactor: especially in WALK there seems to be a lot of repeat code. Using traits I think a lot can be consolidated
-pub mod walk;
-#[cfg(test)]
-mod tests;
 
 use std::str::Chars;
-use crate::{trace, trace_indent, trace_change_indent, trace_set_indent, TAB_SIZE};
-use crate::regexp::walk::{Matched,Input};
+use crate::regexp::{trace, trace_indent, trace_change_indent, trace_set_indent, Error, TAB_SIZE};
+use crate::walk::*;
 use core::fmt::Debug;
 use std::collections::HashMap;
 use home;
@@ -40,7 +37,7 @@ use once_cell::sync::Lazy;
 //use std::cell::RefCell;
 
 /// big number to server as a cap for repetition count
-const EFFECTIVELY_INFINITE: usize = 99999999;
+pub const EFFECTIVELY_INFINITE: usize = 99999999;
 
 //////////////////////////////////////////////////////////////////
 //
@@ -116,13 +113,13 @@ impl Node {
     }
         
     /// Distributes a walk request to the proper XXXNode struct
-    fn walk(&self, matched: Matched) -> Result<walk::Path, Error> {
+    pub fn walk(&self, matched: Matched) -> Result<Path, Error> {
         match self {
-            Node::Chars(chars_node) => walk::CharsStep::walk(chars_node, matched),
-            Node::Special(special_node) => walk::SpecialStep::walk(special_node, matched),
-            Node::Range(range_node) => walk::RangeStep::walk(range_node, matched),
-            Node::And(and_node) => walk::AndStep::walk(and_node, matched),
-            Node::Or(or_node) => walk::OrStep::walk(or_node, matched),
+            Node::Chars(chars_node) => CharsStep::walk(chars_node, matched),
+            Node::Special(special_node) => SpecialStep::walk(special_node, matched),
+            Node::Range(range_node) => RangeStep::walk(range_node, matched),
+            Node::And(and_node) => AndStep::walk(and_node, matched),
+            Node::Or(or_node) => OrStep::walk(or_node, matched),
             Node::Def(def_node) => { def_node.node.walk(matched) }
             Node::None => panic!("NONE node should not be in final tree")
         }
@@ -248,58 +245,58 @@ pub struct CharsNode {
     /// the repetition counts that are accepted in a match. In
     /// traditional REs this is only relevant if **string** is of length 1,
     /// but for the new REs it is fully utilized.
-    limits: Limits,
+    pub(crate) limits: Limits,
     /// If None then this is not recorded. If Some("") it is recorded
     /// but unnamed, otherwise holds the name to reference the
     /// match.
     /// This is not needed for traditional REs but is a
     /// necessary extension for the new parser
-    named: Option<String>,
+    pub(crate) named: Option<String>,
     /// The string to match. It must match exactly.
-    string: String,
+    pub(crate) string: String,
     /// Not used in traditional parser, in alternative one tells
     /// whether it is whether each repetition is named, or the name
     /// refers to all the repetitions
-    name_outside: bool,
+    pub(crate) name_outside: bool,
 }
 
 /// Represents special character codes, such as \d for digits, . for anything, etc.
 #[derive(Default, PartialEq,Clone)]
 pub struct SpecialNode {
     /// the repetition counts that are accepted in a match. 
-    limits: Limits,
+    pub(crate) limits: Limits,
     /// If None then this is not recorded. If Some("") it is recorded
     /// but unnamed, otherwise holds the name to reference the match.
-    named: Option<String>,
+    pub(crate) named: Option<String>,
     /// The character that is special. In case of an escape sequence
     /// (ie \a) it holds only the 
-    special: char,
+    pub(crate) special: char,
     /// Not used in traditional parser, in alternative one tells
     /// whether it is whether each repetition is named, or the name
     /// refers to all the repetitions
-    name_outside: bool,
+    pub(crate) name_outside: bool,
 }
 
 /// Represents a character that is a member of, or is not a member of, a particular set.
 #[derive(Default,PartialEq,Clone)]
 pub struct RangeNode {
     /// the repetition counts that are accepted in a match. 
-    limits: Limits,
+    pub(crate) limits: Limits,
     /// If None then this is not recorded. If Some("") it is recorded
     /// but unnamed, otherwise holds the name to reference the match.
-    named: Option<String>,
+    pub(crate) named: Option<String>,
     /// whether the character should match if it is in the set (false)
     /// or not in the set (true)
     not: bool,
     /// a string containing individual characters in the match
-    chars: String,
+    pub(crate) chars: String,
     /// An array of ranges that can contain the given character
-    ranges: Vec<Range>,
+    pub(crate) ranges: Vec<Range>,
     specials: Vec<char>,
     /// Not used in traditional parser, in alternative one tells
     /// whether it is whether each repetition is named, or the name
     /// refers to all the repetitions
-    name_outside: bool,
+    pub(crate) name_outside: bool,
 }
 
 
@@ -307,39 +304,39 @@ pub struct RangeNode {
 #[derive(Default, PartialEq)]
 pub struct AndNode {
     /// the repetition counts that are accepted in a match. 
-    limits: Limits,
+    pub(crate) limits: Limits,
     /// If None then this is not recorded. If Some("") it is recorded
     /// but unnamed, otherwise holds the name to reference the match.
-    named: Option<String>,
+    pub(crate) named: Option<String>,
     /// An array of child nodes that must all be satisfied for the AND to succeed
-    nodes: Vec<Node>,
+    pub(crate) nodes: Vec<Node>,
     /// (hack) used to handle acnhoring the match to the beginning
     // TODO: change to special character
-    anchor: bool,
+    pub(crate) anchor: bool,
     /// Not used in traditional parser, in alternative one tells
     /// whether it is whether each repetition is named, or the name
     /// refers to all the repetitions
-    name_outside: bool,
+    pub(crate) name_outside: bool,
 }
 
 /// handles OR nodes (A\|B style matches). This node represents a branch in the parse tree
 #[derive(Default, PartialEq)]
 pub struct OrNode {
     /// An array of child nodes one of which must be satisfied for the walk to succeed
-    nodes: Vec<Node>,
+    pub(crate) nodes: Vec<Node>,
     /// Because of the limitations of the OR node in traditional REs
     /// there can be no repetition attached to it, o repeat it must be
     /// wrapped in an AND. However, the alternative parser does allow
     /// repetitions to be required, so the OrNode supports it.
-    limits: Limits,
+    pub(crate) limits: Limits,
     /// If None then this is not recorded. If Some("") it is recorded
     /// but unnamed, otherwise holds the name to reference the match.
     /// Not needed for traditional REs but a feature of the new stle
-    named: Option<String>,
+    pub(crate) named: Option<String>,
     /// Not used in traditional parser, in alternative one tells
     /// whether it is whether each repetition is named, or the name
     /// refers to all the repetitions
-    name_outside: bool,
+    pub(crate) name_outside: bool,
 }
 
 // TODO: This should contain a ref to the node in the defs table, but this requires major lifeline changes which I'm
@@ -352,12 +349,12 @@ pub struct DefNode {
     name: String,
 //    /// Subtree giving the snippet
     node: Box<Node>,
-    limits: Limits,
-    named: Option<String>,
+    pub(crate) limits: Limits,
+    pub(crate) named: Option<String>,
     /// Not used in traditional parser, in alternative one tells
     /// whether it is whether each repetition is named, or the name
     /// refers to all the repetitions
-    name_outside: bool,
+    pub(crate) name_outside: bool,
 }
 
 impl Default for DefNode {
@@ -459,7 +456,7 @@ impl CharsNode {
         Ok(Node::Chars(node))
     }
     /// Checks a string to see if its head matches the contents of this node
-    fn matches(&self, string: &str) -> Option<usize> {
+    pub fn matches(&self, string: &str) -> Option<usize> {
         if string.starts_with(self.string.as_str()) || (self.limits.no_case() && compare_caseless(&self.string, string)) {
             Some(self.string.len())
         }
@@ -536,7 +533,7 @@ impl SpecialNode {
 
     /// Checks whether the given character at the front of the string
     /// matches this node
-    fn matches(&self, string: &str) -> Option<usize> {
+    pub fn matches(&self, string: &str) -> Option<usize> {
         if SpecialNode::char_match(self.special, string) {
             Some(if self.special == '$' {0} else { char_bytes(string, 1) })
         } else { None }
@@ -636,7 +633,7 @@ impl RangeNode {
 
     /// Checks whehter the given character at the front of the string
     /// matches this node
-    fn matches(&self, string: &str) -> Option<usize> {
+    pub fn matches(&self, string: &str) -> Option<usize> {
         if let Some(ch) = string.chars().next() {
             if self.not != (self.chars.contains(ch) ||
                             self.ranges.iter().any(|x| x.contains(ch)) ||
@@ -838,61 +835,6 @@ fn parse(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
     if let (Some('\\'), Some('|')) = chars.peek_2() {
         Ok(OrNode::parse_node(chars.consume(2), node)?)
     } else { Ok(node.trace())}
-}
-
-/// This is the entrypoint to the phase 2, (tree walk) processing. It
-/// is put in this package to make it easier available, since
-/// logically it is part of the regexp search functionality.
-/// If TEXT is non-empty then the string TEXT is searched for the RE represented by TREE. If TEXT is empty then
-/// FILE is opened and read to get the string to search. If FILE also is empty (or if FILE = "-") then the string to
-/// search is read from stdin.
-
-pub fn walk_tree(tree: & Node, from: usize) -> Result<Option<walk::Path<'_>>, Error> {
-    trace_set_indent(0);
-    let mut start_pos = from;
-    let mut char_start = Input::apply(|input| input.full_text[0..from].chars().count());
-    // hey, optimization
-    // deosn't save that much time but makes the trace debug easier to read
-    let root = {if let Node::And(r) = tree { r } else { return Err(Error::make(5, "Root of tree should be Node::And (should not happen)")); }};
-    /*
-    // If the initial node is a character this optimizes by searching for the initial string. It is commented out
-    // because it doesn't account for FILE or STDIN input
-    if !root.anchor {
-        if let Node::Chars(chars_node) = &root.nodes[0] {
-            if chars_node.limits.min > 0 {
-                let input = INPUT.lock().unwrap();
-                match input.full_text.find(chars_node.string.as_str()) {
-                    Some(offset) => {
-                        if offset > 0 {
-                            if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", chars_node.string, offset); }
-                            start_pos = offset;
-                            char_start = input.full_text[0..offset].chars().count();
-                        }
-                    },
-                    None => { return Ok(None); }
-                }
-            }
-        }
-    }
-*/
-    loop {
-        if trace(1) { println!("\n==== WALK \"{}\" ====", Input::abbrev(start_pos, 10)); }
-        let matched = Matched { start: start_pos, end: start_pos, char_start };
-        let path = tree.walk(matched)?;
-        if path.len() > 1 {
-            if trace(1) { println!("--- Search succeeded ---") };
-            return Ok(Some(path));
-        }
-        if trace(1) { println!("==== WALK \"{}\": no match ====", Input::abbrev(start_pos, 10));}
-        if root.anchor { break; }
-        if let Some(ch0) = Input::apply(|input| input.full_text[start_pos..].chars().next()) {
-            start_pos += String::from(ch0).len();
-            char_start += 1;
-        } else {
-            break;
-        }
-    }
-    Ok(None)
 }
 
 //////////////////////////////////////////////////////////////////
@@ -1328,11 +1270,11 @@ fn read_int(chars: &mut Peekable) -> Option<usize> {
 /// handled it causes confusion somewhere, this way handling is limited to the check() method.
 pub struct Limits {
     /// Minimum number of occurences to allow
-    min: usize,
+    pub(crate) min: usize,
     /// Maximum number of occurences to allow
-    max: usize,
+    pub(crate) max: usize,
     /// Holds bits for caseless search and lazy evaluation
-    options: usize
+    pub(crate) options: usize
 }
 
 impl Default for Limits { fn default() -> Limits { Limits{min: 1, max: 1, options: 0} } }
@@ -1366,7 +1308,7 @@ impl Limits {
 
     /// returns a Limit struct parsed out from point. If none is there returns the default
     /// Like parse_if() but always returns a struct, using the default if there is none in the string
-    fn parse(chars: &mut Peekable) -> Result<Limits, Error> {
+    pub(crate) fn parse(chars: &mut Peekable) -> Result<Limits, Error> {
         let next = chars.next();
         if next.is_none() { return Ok(Limits::default()); }
         let next = next.unwrap();
@@ -1421,97 +1363,6 @@ impl Limits {
 
 //////////////////////////////////////////////////////////////////
 //
-// Report
-//
-/// Used to deliver the search results to the caller. Results form a tree, AndNode and OrNode are branches, the other
-/// Nodes are leaves. **Report** is built up from the successful **Path** that walked the entire tree.
-//
-//////////////////////////////////////////////////////////////////
-
-#[derive(Debug,Clone)]
-pub struct Report {
-    /// Match information for the step this Report is representing
-    pub matched: Matched,
-    /// The name of the field: if None then the field should not be included in the Report tree, if Some("") it is included but
-    /// unnamed, otherwise it is recorded with the given name
-    pub name: Option<String>,
-    /// Array of child Report structs, only non-empty for And and Or nodes. OrNodes will have only a single child node, AndNodes can have many.
-    pub subreports: Vec<Report>,
-}
-
-impl<'a> Report {
-    /// Constructor: creates a new report from a successful Path
-    pub fn new(root: &'a crate::regexp::walk::Path) -> Report {
-        let mut reports = root.gather_reports();
-        let mut ret = reports.splice(0.., None);
-        ret.next().unwrap()
-    }
-
-    // API accessor functions
-    /// Gets the string matched by this unit
-    // TODO: Replace this with inline function that does not allocate?
-    pub fn string(&self) -> String {
-        Input::apply(|input| input.full_text[self.matched.start..self.matched.end].to_string())
-    }
-    /// Gets the start and end position of the match in bytes
-    pub fn byte_pos(&self) -> (usize, usize) { (self.matched.start, self.matched.end) }
-    /// Gets the start and end position of the match in chars
-    pub fn char_pos(&self) -> (usize, usize) { (self.matched.char_start, self.matched.char_start + self.matched.len_chars()) }
-    /// Gets the length of the match in bytes
-    pub fn len_bytes(&self) -> usize { self.matched.len_bytes() }
-    /// Gets the length of the match in chars
-    pub fn len_chars(&self) -> usize { self.matched.len_chars() }
-//    pub fn full_string(&self) -> &str { self.matched.full_string }
-    /// Pretty-prints a report with indentation to help make it easier to read
-    pub fn display(&self, indent: usize) {
-        let name_str = { if let Some(name) = &self.name { format!("<{}> ", name) } else { "".to_string() }};
-        print!("{0:1$}", "", indent);
-        let len_chars = self.matched.len_chars();
-        Input::apply(|input| 
-                     println!("\"{}\" {}chars start {}, length {}; bytes start {}, length {}",
-                              &input.full_text[self.matched.start..self.matched.end], name_str, self.matched.char_start, len_chars, self.matched.start, self.matched.end - self.matched.start));
-        self.subreports.iter().for_each(move |r| r.display(indent + TAB_SIZE));
-    }
-
-    /// Gets **Report** nodes representing matches for named Nodes. The return is a *Vec* because named matches can occur multiple
-    /// times - for example, _\?\<name\>abc\)*_
-    pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<&Report> {
-        let mut v = Vec::<&Report>::new();
-        if let Some(n) = &self.name {
-            if n == name { v.push(self); }
-        }
-        for r in &self.subreports {
-            let mut x = r.get_by_name(name);
-            v.append(&mut x);
-        }
-        v
-    }
-
-    /// Gets a hash of  **Report** nodes grouped by name. This just sets things up and calls **get_named_internal()** to do the work
-    pub fn get_named(& self) -> HashMap<&str, Vec<&Report>> {
-        let hash = HashMap::new();
-        self.get_named_internal(hash)
-    }
-
-    /// internal function that does the work for **get_named()**
-    fn get_named_internal<'b: 'a>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report>>) -> HashMap<&'b str, Vec<&Report>> {
-        if let Some(name) = &self.name {
-            if let Some(mut_v) = hash.get_mut(&name.as_str()) {
-                mut_v.push(self);
-            } else {
-                hash.insert(name.as_str(), vec![self]);
-            }
-            for r in self.subreports.iter() {
-                hash = r.get_named_internal(hash);
-            }
-        }
-        hash
-    }
-
-}
-
-//////////////////////////////////////////////////////////////////
-//
 // Peekable
 //
 /// This is an iterator with added features to make linear parsing of the regexp string easier:
@@ -1523,7 +1374,7 @@ impl<'a> Report {
 //////////////////////////////////////////////////////////////////
 
 #[derive(Debug)]
-struct Peekable<'a> {
+pub struct Peekable<'a> {
     /// The char iterator sourcing the chars
     chars: Chars<'a>,
     /// a vector holding characters taken off of *chars* but not consumed. Requests to **next()** grab input from here before looking in **chars**.
@@ -1539,7 +1390,7 @@ impl<'a> Peekable<'a> {
     /// sanity check: if peeked stack exceeds this size it is probably a problem
     const PEEKED_SANITY_SIZE: usize = 20;
     /// create a new **Peekable** to source a string
-    fn new(string: &str) -> Peekable { Peekable { chars: string.chars(), peeked: Vec::<char>::new(), trailer: Vec::<char>::new(), progress_check: 1} }
+    pub(crate) fn new(string: &str) -> Peekable { Peekable { chars: string.chars(), peeked: Vec::<char>::new(), trailer: Vec::<char>::new(), progress_check: 1} }
 
     /// gets the next char from the **Peekable** stream - first checks **peeked**, then **chars**, finally **trailer**
     pub fn next(&mut self) -> Option<char> {
@@ -1638,22 +1489,3 @@ impl<'a> Peekable<'a> {
     }
 }
 
-/// simple struct used to provide control on how errors are displayed
-/// Binding messages with numbers makes testing easier
-/// TODO: add macro interface to make inserting data in messages easier?
-#[derive(Debug)]
-pub struct Error {
-    pub msg: String,
-    pub code: usize,
-}
-
-impl Error {
-    /// constructor
-    fn make(code: usize, msg: &str,) -> Error { Error{code, msg: msg.to_string()}}
-}
-
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        write!(f, "Error:{}: {}", self.code, self.msg)
-    }
-}

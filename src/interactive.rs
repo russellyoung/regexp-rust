@@ -12,10 +12,10 @@
 //! While this can help in writing complex regular expressions or in understanding how the parser and walker work, it was mainly 
 //! as an exercise in Rust.
 
-use crate::regexp::*;
-use crate::set_trace;
+use crate::tree::*;
+use crate::regexp::{Report,set_trace};
 use crate::Config;
-use crate::regexp::walk::Input;
+use crate::walk::{walk_tree,Input};
 use std::io;
 use std::io::Write;    
 use core::fmt::Debug;
