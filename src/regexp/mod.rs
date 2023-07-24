@@ -228,9 +228,16 @@ impl<'a> Report {
         let name_str = { if let Some(name) = &self.name { format!("<{}> ", name) } else { "".to_string() }};
         print!("{0:1$}", "", indent);
         let len_chars = self.matched.len_chars();
+        let file_str = Input::apply(|input| { if let Some(filename) = input.current_file() { format!(": {}", filename) } else { "".to_string() }});
         Input::apply(|input| 
-                     println!("\"{}\" {}chars start {}, length {}; bytes start {}, length {}",
-                              &input.full_text[self.matched.start..self.matched.end], name_str, self.matched.char_start, len_chars, self.matched.start, self.matched.end - self.matched.start));
+                     println!("\"{}\" {}chars start {}, length {}; bytes start {}, length {}{}",
+                              &input.full_text[self.matched.start..self.matched.end],
+                              name_str,
+                              self.matched.char_start,
+                              len_chars,
+                              self.matched.start,
+                              self.matched.end - self.matched.start,
+                              file_str));
         self.subreports.iter().for_each(move |r| r.display(indent + TAB_SIZE));
     }
 

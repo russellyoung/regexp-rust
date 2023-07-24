@@ -1059,6 +1059,7 @@ impl Input {
                 Ok(file) => {
                     self.source = Source::File(BufReader::new(file));
                     self.more_input = true;
+                    self.full_text = "".to_string();
                     self._extend(1)?;  // any positive number forces a read
                     Ok(())
                 }
