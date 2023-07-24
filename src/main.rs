@@ -146,16 +146,17 @@
 //! third phase takes the Path returned by the walk phase and generates the results in a more accessible form.
 //!
 //! A simple example of how to use it is:
+//!
 //! ```
 //! fn search(regexp: &str, text: &str) -> Result<Option<Report>, String>{
 //!     let tree = match regexp::parse_tree(regexp) {
 //!         Ok(node) => node,
 //!         Err(error) => { return Err(error); },
 //!     };
-//!     Input::init_text(text);      // sets the string to search to TEXT
+//!     stderr::Input::init_text(text);      // sets the string to search to TEXT
 //!     match regexp::walk_tree(&tree, 0) {
 //!         Ok(Some((path, char_start, bytes_start))) => {
-//!             return Ok(Some(Report::new(&path, char_start, bytes_start).display(0)))
+//!             return Ok(Some(regexp::Report::new(&path, char_start, bytes_start).display(0)))
 //!         },
 //!         Ok(None) => return Ok(None),
 //!         Err(error) => Err(error),
@@ -209,15 +210,12 @@
 //!   - help:           displays this help  
 //!   - ?:              displays this help  
 
-pub mod tree;
-pub mod walk;
 pub mod regexp;
 mod tests;
 mod interactive;
 
 use crate::interactive::Interactive;
 use crate::regexp::*;
-use crate::walk::Input;
 
 /// Main function to run regexp as a function. It is called by
 /// > cargo run [-t] [-i] [-d LEVEL] [-a LENGTH] \[REGEXP\] \[-t TARGET | FILES...\]

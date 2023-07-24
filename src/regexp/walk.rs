@@ -1128,7 +1128,7 @@ impl Input {
         if from + chars.len() < input.full_text.len() { chars.push_str("..."); }
         chars
     }
-
+    /// If input is from files return the file that is currently being read, if input is a string or stdin returns None
     pub fn current_file(&self) -> Option<&str> {
         if let Some(filenames) = &self.filenames { Some(filenames[self.fileno].as_str()) }
         else { None }
