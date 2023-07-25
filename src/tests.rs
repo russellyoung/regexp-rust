@@ -354,7 +354,7 @@ fn report_test<'a>(re: &'a str, text: &'a str, alt: bool, func: fn(&Report)) {
 }       
 
 fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (usize, usize), child_count: usize) {
-    assert_eq!(report.string(), expected);
+    Input::apply(|input| assert_eq!(report.string(input), expected));
     assert_eq!(report.char_pos(), pos);
     assert_eq!(report.byte_pos(), bytes);
     assert_eq!(report.subreports.len(), child_count);

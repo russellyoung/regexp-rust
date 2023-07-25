@@ -56,13 +56,15 @@ pub fn regexp(config: &Config) -> Result<usize, Error> {
                     let report = Report::new(&path);
                     report.display(0);
                     if config.named {
-                        for (name, v) in report.get_named() {
-                            if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v.last().unwrap().string()); }
-                            else {
-                                println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
-                                v.iter().for_each(|x| println!("    \"{}\"", x.string()));
+                        Input::apply(|input| {
+                            for (name, v) in report.get_named() {
+                                if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v[0].string(input)); }
+                                else {
+                                    println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
+                                    v.iter().for_each(|x| println!("    \"{}\"", x.string(input)));
+                                }
                             }
-                        }
+                        });
                     }
                 }
                 count += 1;
@@ -175,10 +177,9 @@ impl<'a> Report {
 
     // API accessor functions
     /// Gets the string matched by this unit
-    // TODO: Replace this with inline function that does not allocate?
-    pub fn string(&self) -> String {
-        Input::apply(|input| input.full_text[self.matched.start..self.matched.end].to_string())
-    }
+    /// This is intended to be used inside an Input::apply() block, which is how to get the Input object
+    pub fn string<'b>(&'b self, input: &'b Input) -> &'b str { &input.full_text[self.matched.start..self.matched.end] }
+
     /// Gets **Report** nodes representing matches for named Nodes. The return is a *Vec* because named matches can occur multiple
     /// times - for example, _\?\<name\>abc\)*_
     pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<&Report> {

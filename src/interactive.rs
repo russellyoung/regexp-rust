@@ -108,7 +108,7 @@ The commands are:
 ";
 
 /// The commands for the main loop
-const COMMANDS: [&str; 7] = ["regexp", "text", "search", "tree", "walk", "help", "?"];
+const COMMANDS: [&str; 9] = ["regexp", "text", "search", "tree", "walk", "quit", "exit", "help", "?"];
 /// Used to check for continuation lines
 const SLASH_BYTE: u8 = 92;
 impl Interactive {
@@ -185,18 +185,19 @@ impl Interactive {
     
     /// executes the user commands
     fn execute_command(&mut self, words: &Vec<&Report>) -> bool {
-        match get_command(&COMMANDS, &words[0].string()) {
-            "regexp" => self.do_re(words),
-            "text" => self.do_text(words),
-            "search" => self.do_search(words),
-            "help" | "?" => println!("{}", HELP_TEXT),
-            "quit" => { return false; },
-            "exit" => { return get_response("Really exit?", vec!["[yes]", "n[o]"], 0) == "no"; },
-            "tree" => self.do_tree(words),
-            "" => (),
-            "unrecognized" => println!("unrecognized command"),
-            "ambiguous" => println!("ambiguous command"),
-            _ => (),
+        if !words.is_empty() {
+            match Input::apply(|input| get_command(&COMMANDS, words[0].string(input))) {
+                "regexp" => self.do_re(words),
+                "text" => self.do_text(words),
+                "search" => self.do_search(words),
+                "help" | "?" => println!("{}", HELP_TEXT),
+                "quit" => { return false; },
+                "exit" => { return get_response("Really exit?", vec!["yes", "no"], 0) == "no"; },
+                "tree" => self.do_tree(words),
+                "unrecognized" => println!("unrecognized command"),
+                "ambiguous" => println!("ambiguous command"),
+                _ => (),
+            }
         }
         true
     }
@@ -204,8 +205,11 @@ impl Interactive {
     /// executes a **regexp** command
     fn do_re(&mut self, words: &Vec<&Report>) {
         let len = self.res.len();
-        let subcmd = if words.len() > 1 { get_command(&["pop", "history", "list", "traditional", "alternative"], &words[1].string()) } else { "" };
-        match subcmd {
+        let subcmd = if words.len() > 1 {
+            Input::apply(|input| get_command(&["pop", "history", "list", "traditional", "alternative"], words[1].string(input)).to_string())
+        }
+        else { "".to_string() };
+        match subcmd.as_str() {
             "" =>  {
                 if let Some(re) = self.re() { println!("current RE: {:?}", re); }
                 else { println!("No REs stored");
@@ -248,12 +252,15 @@ impl Interactive {
     
     /// executes a *text* command
     fn do_text(&mut self, words:&Vec<&Report>) {
-        let subcmd = if words.len() > 1 { get_command(&["pop", "history", "list", "set"], &words[1].string()) } else { "" };
+        let subcmd = if words.len() > 1 {
+            Input::apply(|input| get_command(&["pop", "history", "list", "set"], words[1].string(input)))
+        }
+        else { "" };
         let len = self.texts.len();
         match subcmd {
             "" =>  {
                 if let Some(text) = self.text() { println!("current text: \"{:?}\"", text); }
-                else { println!("No textsstored");
+                else { println!("No texts stored");
                 }
             },
             "pop" => {
@@ -310,13 +317,15 @@ impl Interactive {
         let mut all = false;
         let mut ptr = 1;
         if words.len() > 1 {
-            if let Ok(num) = words[1].string().parse::<usize>() {
+            if let Ok(num) = Input::apply(|input| words[1].string(input).parse::<usize>()) {
                 trace = num;
                 ptr += 1;
             }
             for word in words[ptr..].iter() {
-                if word.string() == "*" { all = true; }
-                names.push(word.string());
+                Input::apply_mut(|input| {
+                    if word.string(input) == "*" { all = true; }
+                    names.push(word.string(input).to_string());
+                });
             }
         }
         match (self.re(), self.text()) {
@@ -369,8 +378,8 @@ fn print_named_match(name: &str, matches: &Vec<&Report>) {
 fn print_one_named_match(report: &Report, prefix: &str) {
     let byte_pos = report.byte_pos();
     let char_pos = report.char_pos();
-    println!("{}\"{}\", byte position ({}, {}], char position [{}, {})",
-             prefix, report.string(), byte_pos.0, byte_pos.1, char_pos.0, char_pos.1);
+    Input::apply(|input| println!("{}\"{}\", byte position ({}, {}], char position [{}, {})",
+                                  prefix, report.string(input), byte_pos.0, byte_pos.1, char_pos.0, char_pos.1));
 }    
 
 /// gets user response to a question. It takes a list of potential reply strings and returns
@@ -381,8 +390,9 @@ fn print_one_named_match(report: &Report, prefix: &str) {
 fn get_response<'a>(prompt: &'a str, choices: Vec<&'a str>, dflt: usize) -> &'a str {
     let mut buffer = String::new();
     let stdin = io::stdin();
+    let dflt_choice = if dflt < choices.len() { format!(" (default {})", choices[dflt]) } else { "".to_string() };
     loop {
-        print!("{}: ", prompt);
+        print!("{}{}:", prompt, dflt_choice);
         std::io::stdout().flush().unwrap();
         if let Ok(count) = stdin.read_line(&mut buffer) {
             if count < 2 { break; }   // take default
@@ -397,6 +407,7 @@ fn get_response<'a>(prompt: &'a str, choices: Vec<&'a str>, dflt: usize) -> &'a 
             }
             if let Some(cmd) = candidate { return cmd; }
             else { println!("Unrecognized command"); }
+            buffer = "".to_string()
         } else { println!("error reading input"); }
     }
     if dflt < choices.len() { return choices[dflt]; }

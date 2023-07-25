@@ -931,6 +931,8 @@ impl Matched {
     /// Returns the length of the match in chars
     pub fn len_chars(&self) -> usize { Input::apply(|input| input.full_text[self.start..self.end].chars().count()) }
 
+    pub fn string<'a>(&self, input: &'a Input) -> &'a str { &input.full_text[self.start..self.end] }
+    
     /// Builds a new Matched object immediately following the one pointed to by self
     fn next(&self, len: usize) -> Matched {
         Matched {start: self.end, end: self.end + len, char_start: self.char_start + self.len_chars() }
@@ -1067,17 +1069,25 @@ impl Input {
         }
     }
 
-    /// Applies a mathod to the Input static instance. The instance cannot pass back pointers to any of its
-    /// contents, this way lets it be called without needing to allocate memory to pass return values
+    /// Applies a mathod to the Input static instance. This is the supported way to get access to the static
+    /// INPUT instance. The String full_text cannot be referred to outside this block, so passing a closure
+    /// using either apply() or apply_mut() gives access to the static without having to deal explicitly
+    /// with locking. The limitation of course is that the value returned cannot refer to the text.
     pub fn apply<T>(f: impl Fn(&Input) -> T) -> T {
-        let input = &INPUT.lock().unwrap();
-        f(input)
+        //        let input = &INPUT.lock().unwrap();
+        match INPUT.try_lock() {
+            Ok(input) => f(&input),
+            // This should neve happen unless there is a programming error
+            Err(_) => panic!("Attempt to access INPUT when it is already locked")
+        }
     }
 
     /// Like Input::apply() but allows functions with muts
     pub fn apply_mut<T>(mut f: impl FnMut(&Input) -> T) -> T {
-        let input = &INPUT.lock().unwrap();
-        f(input)
+        match INPUT.try_lock() {
+            Ok(input) => f(&input),
+            Err(_) => panic!("Attempt to access INPUT when it is already locked")
+        }
     }
 
     /// Moves to the next input source, a no-op for Cmdline and Stdin input. Returns TRUE if there is another input source, else FALSE
@@ -1129,7 +1139,9 @@ impl Input {
         if from + chars.len() < input.full_text.len() { chars.push_str("..."); }
         chars
     }
+
     /// If input is from files return the file that is currently being read, if input is a string or stdin returns None
+    /// This is intended to be used withon an apply() block
     pub fn current_file(&self) -> Option<&str> {
         if let Some(filenames) = &self.filenames { Some(filenames[self.fileno].as_str()) }
         else { None }
