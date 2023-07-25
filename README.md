@@ -108,13 +108,13 @@ provides the following features:
    ranges. They can be written in several ways: 
    - **"..."** or **'...'** a unit surrounded with either single or
    double quotes is a string unit. This way inserting one of the quote
-   characters is easier. Or, quote characters can be escaped using '\'.
-   - **txt(...)** Similar to the syntax for **and()** and **or()**,
+   characters is easier. Or, quote characters can be escaped using '\\'.
+   - **txt(...)** Similar to the syntax for **and(...)** and **or(...)**,
      the **txt(...)** function can be used to make a string unit.
    - Finally, characters without any unit indicator are interpreted as
      string units. This makes writing them simple, but does have
      drawbacks: no whitespace characters can be embedded, unless
-     preceded by '\', and care must be taken that there is a space
+     preceded by '\\', and care must be taken that there is a space
      afterward to signify the termination. **or(abc def)** will not
      find the string "abc" **or** "def", it will report an error
      because the closing ')' of the **or()** will be interpreted as
@@ -133,14 +133,14 @@ provides the following features:
    proper code.
    - Repetition counts use the traditional notation: '?', '*', '+',
 	 '{...}', optionally followed by '?' to indicate lazy evaluation.
-   - Names are defined by including the name within "<>" brackets. To
-     record a match without a name leave the brackets empty: "<>",
-     define a name by including it inside: "<name>". If no brackets
+   - Names are defined by including the name within "\<\>" brackets. To
+     record a match without a name leave the brackets empty: "\<\>",
+     define a name by including it inside: "\<name\>". If no brackets
      are included the match is not reported in the results structure.
    - The order in which the name and repetition count are given is
-     significant. **_UNIT_(...)+<name>** will have a single named
+     significant. **_UNIT_(...)+\<name\>** will have a single named
      result containing one or more matches of UNIT;
-     **_UNIT_(...)<name>+** will have one or more matches with the
+     **_UNIT_(...)\<name\>+** will have one or more matches with the
      name "name"
  - **Definitions**: commonly used sequences can be defined by using
    the **def(...)** command. Once defined these can be used
