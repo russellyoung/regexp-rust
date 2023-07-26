@@ -26,8 +26,9 @@
 // - refactor: especially in WALK there seems to be a lot of repeat code. Using traits I think a lot can be consolidated
 
 use std::str::Chars;
-use crate::regexp::{trace, trace_indent, trace_change_indent, trace_set_indent, Error, TAB_SIZE};
+use crate::regexp::{trace_level, trace_indent, trace_set_indent, Error, TAB_SIZE};
 use crate::walk::*;
+use crate::{trace, trace_change_indent};
 use core::fmt::Debug;
 use std::collections::HashMap;
 use home;
@@ -211,10 +212,8 @@ impl Node {
     fn is_none(&self) -> bool { *self == Node::None }
 
     /// Used for tracing, expected to be called on Node creation so if the trace level is 2 or higher it is displayed.
-    /// **Important:** This function decreases the indent depth when called from AND or OR. It should be paired with 
-    /// the *trace_enter()* call (or something similar), to restore the indent level when the node parse is finished.
     fn trace(self) -> Self {
-        if trace(2) {
+        if trace_level(2) {
             match &self {
                 Node::Def(_) | Node::And(_) | Node::Or(_) => trace_change_indent(-1),
                 _ => ()
@@ -225,15 +224,6 @@ impl Node {
         self
     }
 }
-/// A debugging/trace function, called when a node starts parsing the RE. It should only be called after checking he trace level.
-/// **Important:** This function increases the indent depth when called from AND or OR. It should be paired with 
-/// the *xxx_node.trace()* call (or something similar), to restore the indent level when the node parse is finished.
-fn trace_enter(name: &str, chars: &mut Peekable) {
-    trace_indent();
-    println!("{} starting from \"{}\"", name, chars.preview(6));
-    if name == "DEF" || name == "AND" || name == "OR" { trace_change_indent(1); }
-}
-
 //
 // Node struct subtypes: these are wrapped in the Node enum to make them easy to pass around
 //
@@ -404,7 +394,7 @@ impl CharsNode {
     /// trickier because characters do not "clump" when attached to
     /// repetitions or OR nodes, so in some cases a **CharsNode** must be split.
     fn parse_node(chars: &mut Peekable, after_or: bool) -> Result<Node, Error> {
-        if trace(2) { trace_enter("CHARS", chars); }
+        trace!(2, "CHARS starting from \"{}\"", chars.preview(6));
         let mut node = CharsNode::default();
         let mut count = 0;
         if let (Some('\\'), Some(c)) = chars.peek_2() {
@@ -520,7 +510,7 @@ impl SpecialNode {
     /// identical.
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let mut node = SpecialNode::default();
-        if trace(2) { trace_enter("SPECIAL", chars); }
+        trace!(2, "SPECIAL starting from \"{}\"", chars.preview(6));
         match (chars.next(), chars.peek()) {
             (Some('\\'), Some(_)) => node.special = chars.next().unwrap(),
             (Some('.'), _) => node.special = '.',
@@ -601,7 +591,7 @@ impl RangeNode {
     /// definitions and handling are identical.
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
         let mut node = RangeNode::default();
-        if trace(2) { trace_enter("RANGE", chars); }
+        trace!(2, "RANGE starting from \"{}\"", chars.preview(6));
         if let Some('^') = chars.peek() {
             chars.consume(1);
             node.not = true;
@@ -678,7 +668,8 @@ impl Debug for AndNode {
 impl AndNode {
     /// Recursively parses an AND node from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { trace_enter("AND", chars); }
+        trace!(2, "AND starting from \"{}\"", chars.preview(6));
+        trace_change_indent!(2, 1);
         let named = AndNode::parse_named(chars)?;
         let mut nodes = Vec::<Node>::new();
         loop {
@@ -750,7 +741,8 @@ impl Debug for OrNode {
 impl OrNode {
     /// Recursively parses an OR node from the front of the Peekable stream
     fn parse_node(chars: &mut Peekable, preceding_node: Node) -> Result<Node, Error> {
-        if trace(2) { trace_enter("OR", chars); }
+        trace!(2, "OR starting from \"{}\"", chars.preview(6));
+        trace_change_indent!(2, 1);
         let mut nodes = vec![preceding_node];
         match parse(chars, true)? {
             Node::Or(mut or_node) => nodes.append(&mut or_node.nodes),
@@ -908,7 +900,7 @@ fn alt_parse(chars: &mut Peekable) -> Result<Node, Error> {
 impl CharsNode {
     /// Entry point to parse a single Chars unit using the alternative parser
     fn alt_parse_node(chars: &mut Peekable, terminate: char) -> Result<Node, Error> {
-        if trace(2) { trace_enter("CHARS", chars); }
+        trace!(2, "CHARS starting from \"{}\"", chars.preview(6));
         let mut chars_node = CharsNode::default();
         let mut new_node: Node;
         let mut nodes = Vec::<Node>::new();
@@ -997,7 +989,8 @@ impl RangeNode {
 impl AndNode {
     /// Recursively parses an AND node from the front of the Peekable stream
     fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { trace_enter("AND", chars); }
+        trace!(2, "AND starting from \"{}\"", chars.preview(6));
+        trace_change_indent!(2, 1);
         let mut nodes = Vec::<Node>::new();
         loop {
             match chars.next() {
@@ -1024,7 +1017,8 @@ impl AndNode {
 impl OrNode {
     /// Recursively parses an OR node from the front of the Peekable stream
     fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> {
-        if trace(2) { trace_enter("OR", chars); }
+        trace!(2, "OR starting from \"{}\"", chars.preview(6));
+        trace_change_indent!(2, 1);
         let mut nodes = Vec::<Node>::new();
         loop {
             match chars.next() {
@@ -1074,10 +1068,11 @@ impl Debug for DefNode {
 impl DefNode {
     /// Provides a snippet definition to splice into the parse tree
     fn alt_parse_node(chars: &mut Peekable) -> Result<Node, Error> { 
-        if trace(2) { trace_enter("DEF", chars); }
+        trace!(2, "DEF starting from \"{}\"", chars.preview(6));
+        trace_change_indent!(2, 1);
         let name = Defs::name_from_stream(chars, false);
         if name.is_empty() { return Err(Error::make(106, "Missing required name for RE load")); }
-        if trace(4) { trace_indent(); println!("defining def {}", name); }
+        trace!(4, "defining def {}", name);
         if let Some(')') = chars.skip_whitespace().next() {}
         else { return Err(Error::make(107, "Bad char in definition name")); }
         Ok(Node::Def(DefNode{name, node: Box::new(Node::None), limits: Limits::default(), named: None, name_outside: false}))
@@ -1108,8 +1103,9 @@ impl Defs {
         let name = Defs::name_from_stream(chars, false);
         if let Some(':') = chars.next() {}
         else {return Err(Error::make(111, "Missing required name for RE definition")); }
-        if trace(1) && DEFS.lock().unwrap().defs.get(&name).is_some() { trace_indent(); println!("Overriding definition of {}", name); }
-        if trace(2) { trace_indent(); println!("reading definition of {}", name); trace_change_indent(1); }
+        if DEFS.lock().unwrap().defs.get(&name).is_some() { trace!(1, "Overriding definition of {}", name); }
+        trace!(2, "reading definition of {}", name);
+        trace_change_indent!(2, 1);
         let mut nodes = Vec::<Node>::new();
         loop {
             chars.skip_whitespace();
@@ -1138,7 +1134,8 @@ impl Defs {
         }
 
         DEFS.lock().unwrap().defs.insert(name, root);
-        if trace(2) { trace_change_indent(-1); trace_indent(); println!("finished definition"); }
+        trace_change_indent!(2, -1);
+        trace!(2, "finished definition");
         Ok(Node::None)
     }
 
@@ -1153,7 +1150,8 @@ impl Defs {
         let path = Defs::path_from_stream(chars);
         if let Some(')') = chars.skip_whitespace().next() {}
         else {return Err(Error::make(113, "Malformed \"use\" statement"));}
-        if trace(1) { trace_indent(); println!("loading definitions from file '{:#?}'", path); trace_change_indent(1); }
+        trace!(1, "loading definitions from file '{:#?}'", path);
+        trace_change_indent!(1, 1);
 
         match std::fs::read_to_string(&path) {
             Err(err) => { return Err(Error::make(114, format!("Error reading def file {}: {}", path, err).as_str())) },
@@ -1162,7 +1160,7 @@ impl Defs {
                 while def_chars.skip_whitespace().peek().is_some() {
                     if def_chars.peek() != Some('#'){
                         if let Node::Def(def_node) = alt_parse(&mut def_chars)? {
-                            if trace(2) { trace_indent(); println!("Read definition of {} from {}", def_node.name, path); }
+                            trace!(2, "Read definition of {} from {}", def_node.name, path);
                         }
                     } else {
                         loop {
@@ -1176,12 +1174,9 @@ impl Defs {
                 }
             }
         }
-        if trace(1) {
-            if trace(2) { trace_indent(); println!("finished load of '{:#?}'", path);}
-            trace_change_indent(-1);
-        }
+        trace!(2, "finished load of '{:#?}'", path);
+        trace_change_indent!(1, -1);
         Ok(Node::None)
-        
     }
     /// gets a name from the input stream
     fn name_from_stream(chars: &mut Peekable, file: bool) -> String {

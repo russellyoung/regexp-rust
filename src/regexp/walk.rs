@@ -3,7 +3,7 @@
 //! RE tree) is represented by a **Step** object. The **Step**s are grouped in vectors to form **Path**s, each of which represents
 //! a walk through the tree. When a **Path** reaches the end of the tree successfully it means the search has succeeded and that
 //! **Path* is returned, representing a matched string, so it can generate a **Report** giving its route.
-use crate::regexp::{trace, trace_indent, trace_change_indent, trace_set_indent, Error,Report};
+use crate::regexp::{trace_level, trace_indent, trace_set_indent, Error,Report};
 use crate::tree::*;
 use std::io::BufReader;
 use std::io::BufRead;
@@ -11,6 +11,7 @@ use std::io::BufRead;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use core::fmt::Debug;
+use crate::{trace, trace_change_indent};
 
 /// simplifies code a little by removing the awkward accessing of the last element in a vector
 
@@ -156,7 +157,7 @@ impl<'a> Path<'a> {
     /// - back off the last step, check if that still meets the requirements. For greedy evaluation this means popping
     ///   off a step from the Path, for lazy eval it means adding a new step
     fn back_off(&mut self) -> Result<bool, Error> {
-        if trace(6) { trace_change_indent(1); }
+        trace_change_indent!(6, 1);
         let limits = self.limits();
         let mut ret = false;
         if limits.lazy() {
@@ -168,7 +169,7 @@ impl<'a> Path<'a> {
                             ret = true;
                         }
                     }
-                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret); }
+                    trace!(6, "back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret);
                 },
                 Path::Special(steps) => {
                     if limits.check(steps.len() + 1) == 0 {
@@ -177,7 +178,7 @@ impl<'a> Path<'a> {
                             ret = true;
                         }
                     }
-                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret); }
+                    trace!(6, "back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret);
                 },
                 Path::Range(steps) => {
                     if limits.check(steps.len() + 1) == 0 {
@@ -186,7 +187,7 @@ impl<'a> Path<'a> {
                             ret = true;
                         }
                     }
-                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret); }
+                    trace!(6, "back off Path lazy: {:?}, new step count {}: {}", steps.last().unwrap(), steps.len(), ret);
                 },
                 Path::And(steps) => {
                     let len0 = steps.len();
@@ -196,8 +197,8 @@ impl<'a> Path<'a> {
                             steps.push(next_step);
                             ret = true;
                         } 
-                    } 
-                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, steps was {}, now {}: {}", steps.last().unwrap(), len0, steps.len(), ret); }
+                    }
+                    trace!(6, "back off Path lazy: {:?}, steps was {}, now {}: {}", steps.last().unwrap(), len0, steps.len(), ret);
                 },
                 Path::Or(steps) => {
                     let len0 = steps.len();
@@ -207,8 +208,8 @@ impl<'a> Path<'a> {
                             steps.push(next_step);
                             ret = true;
                         } 
-                    } 
-                    if trace(6) { trace_indent(); println!("back off Path lazy: {:?}, steps was {}, now{}: {}", steps.last().unwrap(), len0, steps.len(), ret); }
+                    }
+                    trace!(6, "back off Path lazy: {:?}, steps was {}, now{}: {}", steps.last().unwrap(), len0, steps.len(), ret);
                 },
                 _ => panic!("Should not be trying to back off None node"),
             }
@@ -217,17 +218,17 @@ impl<'a> Path<'a> {
                 Path::Chars(steps) => {
                     let _last_step = steps.pop().unwrap();
                     ret = limits.check(steps.len()) == 0;
-                    if trace(6) { trace_indent(); println!("back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret); }
+                    trace!(6, "back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret);
                 },
                 Path::Special(steps) => {
                     let _last_step = steps.pop().unwrap();
                     ret = limits.check(steps.len()) == 0;
-                    if trace(6) { trace_indent(); println!("back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret); }
+                    trace!(6, "back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret); 
                 },
                 Path::Range(steps) => {
                     let _last_step = steps.pop().unwrap();
                     ret = limits.check(steps.len()) == 0;
-                    if trace(6) { trace_indent(); println!("back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret); }
+                    trace!(6, "back off Path: {:?}, new step count {}: {}", steps.last(), steps.len(), ret);
                 },
                 Path::And(steps) => {
                     let mut last_step = steps.pop().unwrap();
@@ -238,7 +239,7 @@ impl<'a> Path<'a> {
                     } else {
                         ret = limits.check(steps.len()) == 0;
                     }
-                    if trace(6) { trace_indent(); println!("back off: {:?}, steps was {}, now {}: {}", steps.last().unwrap(), len0, steps.len(), ret); }
+                    trace!(6, "back off: {:?}, steps was {}, now {}: {}", steps.last().unwrap(), len0, steps.len(), ret);
                 },
                 Path::Or(steps) => {
                     let len0 = steps.len();
@@ -249,12 +250,12 @@ impl<'a> Path<'a> {
                     } else {
                         ret = limits.check(steps.len()) == 0;
                     }
-                    if trace(6) { trace_indent(); println!("back off Path: {:?} steps was {}, now {}", steps.last().unwrap(), len0, steps.len()); }
+                    trace!(6, "back off Path: {:?} steps was {}, now {}", steps.last().unwrap(), len0, steps.len());
                 },
                 _ => panic!("Should not be trying to back off None node"),
             }
         }
-        if trace(6) { trace_change_indent(-1); }
+        trace_change_indent!(6, -1);
         Ok(ret)
     }
 
@@ -362,8 +363,6 @@ impl<'a> Path<'a> {
     }
 }
 
-// TODO: This should have a Result<> return, but it is a late addition and I don't really have the incentive to
-// change all the return types now
 // I think new steps cannot go backwards, so if any step but step 0 has a series of matches of length 0 (maybe even
 // 2) it means an infinite loop. I chose to call this every 30 steps, but if the max level is set less than max
 // I assume the caller knows what he is doing
@@ -391,42 +390,23 @@ trait Walker<'a> {
 /// level 10: dump out paths as they are extended
 /// prints message when entering walk (trace level 2)
 fn trace_start_walk<T: Debug>(vec: &[T]) {
-    if trace(2) {
-        trace_indent();
-        println!("Start walk for {:?}", &vec[0]);
-        trace_change_indent(1);
-    }
+    trace!(2, "Start walk for {:?}", &vec[0]);
+    trace_change_indent!(2, 1);
 }
 
 /// prints message when finishing walk (trace level 3)
 fn trace_end_walk(path: Path) -> Path {
-    if trace(2) {
-        trace_change_indent(-1);
-        if trace(3) {
-            trace_indent();
-            let ok = if path.limits().check(path.len()) == 0 { format!("matches \"{}\"", path.matched_string())} else { "no match".to_string()};
-            println!("End walk for {:?}, {} steps, {}", path, path.len() - 1, ok);
-        }
-        if trace(10) { path.dump(0); }
-    }
+    trace_change_indent!(2, -1);
+    trace!(3, "End walk for {:?}, {} steps, {}", path, path.len() - 1,
+            if path.limits().check(path.len()) == 0 { format!("matches \"{}\"", path.matched_string())} else { "no match".to_string() });
+    if trace_level(10) { path.dump(0); }
     path
 }
 
 /// prints message when adding a Step to a Path (trace level 4)
 fn trace_pushing<T: Debug>(obj: &T, len: usize) {
-    if trace(4) {
-        trace_indent();
-        println!("Pushing {:?} rep {}", obj, len - 1);
-    }
+    trace!(4, "Pushing {:?} rep {}", obj, len - 1);
 }
-/// prints message when taking a new step during a walk (trace level 4)
-fn trace_new_step(and_step: &AndStep) {
-    if trace(5) {
-        trace_indent();
-        println!("-- new child step in AND: {:?}", and_step);
-    }
-}
-
 
 //////////////////////////////////////////////////////////////////
 //
@@ -698,7 +678,7 @@ impl<'a> AndStep<'a> {
                 step.child_paths.push(child_path);
                 // This could be done by removing the "else" below, but putting it here makes the trace up-to-date
                 step.matched.set_end(step.child_paths.last().unwrap().end());
-                trace_new_step(&step);
+                trace!(5, "-- new child step in AND: {:?}", &step);
             } else if !step.back_off()? {
                 return Ok(None);
             } else {
@@ -716,10 +696,8 @@ impl<'a> AndStep<'a> {
     /// or pop off the last step, but cannot change anything inside any of the *Step**s. **XXXStep::back_off()** ,
     /// on the other hand, should only change things within the current Step, that is 
     fn back_off(&mut self) -> Result<bool, Error> {
-        if trace(6) {
-            trace_indent(); println!("back off Node: {:?}", self);
-            trace_change_indent(1);
-        }
+        trace!(6, "back off Node: {:?}", self);
+        trace_change_indent!(6, 1);
         let limits = self.node.limits;
         let mut ret = true;
         if limits.lazy() {
@@ -746,10 +724,8 @@ impl<'a> AndStep<'a> {
         if ret {
             self.matched.set_end(self.child_paths.last().unwrap().end());
         }
-        if trace(6) {
-            trace_change_indent(-1);
-            trace_indent(); println!("back off Node: {}: {:?}", ret, self);
-        }
+        trace_change_indent!(6, -1);
+        trace!(6, "back off Node: {}: {:?}", ret, self);
         Ok(ret)
     }
 
@@ -799,30 +775,28 @@ impl<'a> OrStep<'a> {
         };
         loop {
             if step.which == step.node.nodes.len() {
-                if trace(4) { trace_indent(); println!("OR step failed (exhausted)"); }
+                trace!(4, "OR step failed (exhausted)");
                 return Ok(None);
             }
             step.child_path = Box::new(step.node.nodes[step.which].walk(self.matched.next(0))?);
             if step.child_path.limits().check(step.child_path.len()) == 0 { break; }
             step.which += 1;
         }
-        if trace(6) { trace_indent(); println!("    new OR step: {:?}", step); }
+        trace!(6, "    new OR step: {:?}", step); 
         step.matched.set_end(step.child_path.end());
         Ok(Some(step))
     }
 
     fn back_off(&mut self) -> Result<bool, Error> {
-        if trace(6) {
-            trace_indent(); println!("back off Node: {:?}", self);
-            trace_change_indent(1);
-        }
+        trace!(6, "back off Node: {:?}", self);
+        trace_change_indent!(6, 1);
         let ret;
         loop {
             if self.child_path.back_off()? {
                 ret = "true: child backed off";
                 break;
             }
-            if trace(6) { trace_indent(); println!("back off (next option){:?}", self); }
+            trace!(6, "back off (next option){:?}", self); 
             self.which += 1;
             self.matched.set_end(self.matched.start);
             if self.which >= self.node.nodes.len() {
@@ -835,7 +809,8 @@ impl<'a> OrStep<'a> {
                 break;
             }
         }
-        if trace(6) { trace_change_indent(-1); trace_indent(); println!("back off Node: {}: {:?}", ret, self); }
+        trace_change_indent!(6, -1);
+        trace!(6, "back off Node: {}: {:?}", ret, self);
         if !self.child_path.is_empty() {
             self.matched.set_end(self.child_path.end());
         }
@@ -843,7 +818,7 @@ impl<'a> OrStep<'a> {
     }
 
     pub fn dump(&self, rank: usize, indent: usize) {
-        trace_indent(); println!("|{0:1$}{2}: {3:?} {4} of {5}", "", 4*indent, rank, self, self.which, self.node.nodes.len());
+        trace!(0, "|{0:1$}{2}: {3:?} {4} of {5}", "", 4*indent, rank, self, self.which, self.node.nodes.len());
         self.child_path.dump(indent + 1);
     }
 }
@@ -872,7 +847,7 @@ pub fn walk_tree(tree: & Node, from: usize) -> Result<Option<Path<'_>>, Error> {
                 match input.full_text.find(chars_node.string.as_str()) {
                     Some(offset) => {
                         if offset > 0 {
-                            if trace(1) { println!("\nOptimization: RE starts with \"{}\", skipping {} bytes", chars_node.string, offset); }
+                            trace!(1, "\nOptimization: RE starts with \"{}\", skipping {} bytes", chars_node.string, offset); 
                             start_pos = offset;
                             char_start = input.full_text[0..offset].chars().count();
                         }
@@ -884,14 +859,14 @@ pub fn walk_tree(tree: & Node, from: usize) -> Result<Option<Path<'_>>, Error> {
     }
 */
     loop {
-        if trace(1) { println!("\n==== WALK \"{}\" ====", Input::abbrev(start_pos, 10)); }
+        trace!(1, "\n==== WALK \"{}\" ====", Input::abbrev(start_pos, 10));
         let matched = Matched { start: start_pos, end: start_pos, char_start };
         let path = tree.walk(matched)?;
         if path.len() > 1 {
-            if trace(1) { println!("--- Search succeeded ---") };
+            trace!(1, "--- Search succeeded ---");
             return Ok(Some(path));
         }
-        if trace(1) { println!("==== WALK \"{}\": no match ====", Input::abbrev(start_pos, 10));}
+        trace!(1, "==== WALK \"{}\": no match ====", Input::abbrev(start_pos, 10));
         if root.anchor { break; }
         if let Some(ch0) = Input::apply(|input| input.full_text[start_pos..].chars().next()) {
             start_pos += String::from(ch0).len();
@@ -1050,7 +1025,7 @@ impl Input {
     
     /// sets up the text input to read from a new file
     fn use_file(&mut self, filename: &str) -> Result<(), Error> {
-        if trace(1) { println!("trying to open file {} for input", filename); }
+        trace!(1, "trying to open file {} for input", filename);
         if filename == "-" { Input::init_stdin() }
         else {
             match std::fs::File::open(filename) {

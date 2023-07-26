@@ -247,18 +247,17 @@ impl<'a> Report {
 /// value for tab size: the number of spaces to indent for each level
 pub const TAB_SIZE:usize = 4;
 
-// TODO: make trace a macro?
 /// the debug levelthe program is running under
-static TRACE_LEVEL: AtomicUsize = AtomicUsize::new(0);
+pub static TRACE_LEVEL: AtomicUsize = AtomicUsize::new(0);
 /// the number of indents to print before nested trace lines
-static TRACE_INDENT: AtomicIsize = AtomicIsize::new(0);
+pub static TRACE_INDENT: AtomicIsize = AtomicIsize::new(0);
 
 pub(crate) fn set_trace(level: usize) {
     TRACE_LEVEL.store(level, Release)
 }
 
 /// **trace()** is used to control output of debug information, and also to view steps in the walk phase. It uses a static mut value in order to be available everywhere. 
-pub(crate) fn trace(level: usize) -> bool {
+pub(crate) fn trace_level(level: usize) -> bool {
     level <= TRACE_LEVEL.load(Acquire)
 }
 
@@ -280,7 +279,6 @@ pub(crate) fn trace_indent() {
 
 /// simple struct used to provide control on how errors are displayed
 /// Binding messages with numbers makes testing easier
-/// TODO: add macro interface to make inserting data in messages easier?
 #[derive(Debug)]
 pub struct Error {
     pub msg: String,
@@ -297,3 +295,22 @@ impl core::fmt::Display for Error {
         write!(f, "Error:{}: {}", self.code, self.msg)
     }
 }
+
+/// If LEVEL >= current debug level then print out the remaining arguments in println!()-like fashion
+#[macro_export]
+macro_rules! trace {
+    ( $level:expr, $($arg:tt)*) => {
+        #[allow(unused_comparisons)]   // pass 0 as level to print a message, his suppresses the warning
+        if $level <= $crate::TRACE_LEVEL.load(core::sync::atomic::Ordering::Acquire) { trace_indent(); println!($($arg)*); }
+    }
+}
+
+/// If LEVEL >= current debug level adjust the indent level by adding DELTA to it
+#[macro_export]
+macro_rules! trace_change_indent {
+    ( $level:expr, $delta:expr) => {
+        #[allow(unused_comparisons)]
+        if $level <= $crate::TRACE_LEVEL.load(core::sync::atomic::Ordering::Acquire) { $crate::TRACE_INDENT.fetch_add($delta, core::sync::atomic::Ordering::AcqRel); }
+    }
+}
+

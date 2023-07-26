@@ -9,7 +9,7 @@ pub static LOCK: Mutex<usize> = Mutex::new(0);
 
 //
 // Initial tests are basic sanity tests for the tree parser. They are relatively simple because the
-// search tests (TODO) will provide more complete testing. These are intended mainly as a sanity check
+// search tests will provide more complete testing. These are intended mainly as a sanity check
 // make sure that the parsing basically works.
 //
 
