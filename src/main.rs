@@ -4,7 +4,7 @@
 //! This is a sample Rust program to search strings using regular expressions
 //! similar to (but not identical to) elisp regular expressions (which is also similar to perl
 //! regular expressions).
-//! 
+//!
 //! The basic regular expression syntax is like elisp:
 //!  - **non-special characters**: match themselves
 //!  - **special characters**
@@ -27,14 +27,14 @@
 //!    - **\(?\<NAME\>...\)**: Matches will be reported in the Report structure associated with NAME, to make it easier to find
 //!  - **or groups**
 //!    -**A\|B** matches either the regular expression A or the regular expression B
-//!  - **repetition counts**: any expression can beexecuted multiple times by suffixing it with a repetition code 
+//!  - **repetition counts**: any expression can beexecuted multiple times by suffixing it with a repetition code
 //!    - __*__: match any number of times from 0 up
 //!    - **+**: match any number of times from 1 up
 //!    - **?**: match 0 or 1 repetition
 //!    - **{N}**: match exactly N times
 //!    - **{N,}**: match N or more times
 //!    - **{N,M}**: match any number of repititions from M to N
-//! 
+//!
 //! By default this uses a greedy search algorithm: it always matches as many times as possible and backs off if needed.
 //! Any repetition code can be directed to use a lazy algorithm by suffixing it with '?'. (ie "*?, +?, ??, etc.) Lazy
 //! evaluation first matches the smalles number allowed and adds extra instances if allowed as needed.
@@ -58,7 +58,7 @@
 //!       - explicitly wrapping text with the **txt** tag: **txt(...)**
 //!       - Wrapping the text in single quotation marks: **'...'**
 //!       - Wrapping the text in double quotation marks: **"..."**
-//!       - any text entered that is not included in some other tag is assumed to be text. This form, while simple, 
+//!       - any text entered that is not included in some other tag is assumed to be text. This form, while simple,
 //!          can have unexpected behavior: first, whitespace acts to terminate a node rather than being embedded in it, so
 //!          "**AB CD**" matched "_ABCD_" while "**"AB CD"**" matches "AB CD". Also, there must be a terminating space. For
 //!          example, while "**and('abc')**" is an **and** node containing the single subnode "abc", "**and(abc)**" will fail
@@ -119,13 +119,13 @@
 //! ## Usage
 //! #### Command line
 //! From the help:
-//! 
+//!
 //! Usage: regexp \[OPTIONS\] \[RE\] \[FILES\]...
-//! 
+//!
 //! Arguments:
 //!   \[RE\]        Regular expression to search for (required unless --interactive) \[default: ""\]
 //!   \[FILES\]...  Files to search, file to search
-//! 
+//!
 //! Options:
 //!   -t, --text \<TEXT\>      \[default: "" \]
 //!   -p, --parser \<PARSER\>  Parser to use. Will accept abbreviations. Currently supported are 'traditional' and 'alternative' [default: traditional]
@@ -165,7 +165,7 @@
 //!
 //!```
 //!
-//! 
+//!
 //! THere are 3 functions to choose from to initialize the buffer:
 //! Input::init_text() to search a text string, Input::init_files() to
 //! search the contents of a list of files, and input::init_stdin() to
@@ -210,9 +210,9 @@
 //!   - help:           displays this help  
 //!   - ?:              displays this help  
 
+mod interactive;
 pub mod regexp;
 mod tests;
-mod interactive;
 
 use crate::interactive::Interactive;
 use crate::regexp::*;
@@ -237,8 +237,10 @@ pub fn main() {
             return;
         }
     };
-    
-    if config.interactive { return Interactive::new(config).run(); }
+
+    if config.interactive {
+        return Interactive::new(config).run();
+    }
     set_trace(config.debug as usize);
     // execution starts
     match regexp(&config) {
@@ -254,6 +256,4 @@ pub fn main() {
             }
         }
     }
-
 }
-

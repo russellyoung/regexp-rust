@@ -3,12 +3,15 @@ pub mod walk;
 
 // Export functions
 pub use crate::regexp::tree::parse_tree;
-pub use crate::regexp::walk::{walk_tree,Input};
+pub use crate::regexp::walk::{walk_tree, Input};
 
 use crate::regexp::walk::Matched;
+use clap::{value_parser, Parser}; // Command Line Argument Processing
+use core::sync::atomic::{
+    AtomicIsize, AtomicUsize,
+    Ordering::{AcqRel, Acquire, Release},
+};
 use std::collections::HashMap;
-use clap::{Parser, value_parser};               // Command Line Argument Processing
-use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering::{Acquire, Release, AcqRel}};
 
 /// General function to run a search based on the parameters in the passed Config. This can be used to simulate a grep
 /// replacement. It does a search and prints out the results according to the instructions in Config. It returns the
@@ -20,20 +23,27 @@ pub fn regexp(config: &Config) -> Result<usize, Error> {
         println!("--- Parse tree:");
         tree.desc(0);
     }
-    if !config.text.is_empty() { Input::init_text(&config.text)? }
-    else if !config.files.is_empty() { Input::init_files(&config.files)? }
-    else { Input::init_stdin()? }
+    if !config.text.is_empty() {
+        Input::init_text(&config.text)?
+    } else if !config.files.is_empty() {
+        Input::init_files(&config.files)?
+    } else {
+        Input::init_stdin()?
+    }
     let mut start: usize = 0;
     let match_number: usize = if config.all { 0 } else { config.count as usize };
     'main: loop {
         match walk_tree(&tree, start) {
             Err(msg) => eprintln!("{}", msg),
-            Ok(None) => {
-                loop {
-                    match Input::next() {
-                        Err(msg) => eprintln!("{}", msg),
-                        Ok(false) => { break 'main; },
-                        Ok(true) => { start = 0; break; },
+            Ok(None) => loop {
+                match Input::next_file() {
+                    Err(msg) => eprintln!("{}", msg),
+                    Ok(false) => {
+                        break 'main;
+                    }
+                    Ok(true) => {
+                        start = 0;
+                        break;
                     }
                 }
             },
@@ -58,10 +68,19 @@ pub fn regexp(config: &Config) -> Result<usize, Error> {
                     if config.named {
                         Input::apply(|input| {
                             for (name, v) in report.get_named() {
-                                if v.len() == 1 { println!("{}: \"{}\"", if name.is_empty() {"(unnamed)"} else {name}, v[0].string(input)); }
-                                else {
-                                    println!("{}: ", if name.is_empty() {"(unnamed)"} else {name});
-                                    v.iter().for_each(|x| println!("    \"{}\"", x.string(input)));
+                                if v.len() == 1 {
+                                    println!(
+                                        "{}: \"{}\"",
+                                        if name.is_empty() { "(unnamed)" } else { name },
+                                        v[0].string(input)
+                                    );
+                                } else {
+                                    println!(
+                                        "{}: ",
+                                        if name.is_empty() { "(unnamed)" } else { name }
+                                    );
+                                    v.iter()
+                                        .for_each(|x| println!("    \"{}\"", x.string(input)));
                                 }
                             }
                         });
@@ -69,7 +88,9 @@ pub fn regexp(config: &Config) -> Result<usize, Error> {
                 }
                 count += 1;
                 start = path.end();
-                    if count == match_number { break; }
+                if count == match_number {
+                    break;
+                }
             }
         }
     }
@@ -77,8 +98,6 @@ pub fn regexp(config: &Config) -> Result<usize, Error> {
 }
 
 /// search strings using either traditional regular expressions or in a new (better) syntax
-/// default value for the **--Abbrev** switch
-const ABBREV_DEFAULT: u32 = 5;
 /// default value for the **--alt** switch
 const PARSER_DEFAULT: &str = "traditional";
 
@@ -91,7 +110,7 @@ pub struct Config {
     pub re: String,
     /// Files to search, file to search
     #[clap(num_args=0..)]
-    pub files: Vec<String>, 
+    pub files: Vec<String>,
     #[clap(short, long, default_value_t = String::from(""))]
     pub text: String,
     /// Parser to use. Will accept abbreviations. Currently supported are 'traditional' and 'alternative'.
@@ -110,16 +129,16 @@ pub struct Config {
     #[clap(short, long, default_value_t = 0, value_parser=value_parser!(u32).range(0..40))]
     pub debug: u32,
     /// Prints result for all named units
-    #[clap(short, long, default_value_t = false, )]
+    #[clap(short, long, default_value_t = false)]
     pub named: bool,
     /// find all instances instead of just first
-    #[clap(short,long,default_value_t = false)]
+    #[clap(short, long, default_value_t = false)]
     pub all: bool,
     /// number of matches to find. Overruled by --all if it appears
     #[clap(short, long, default_value_t = 1)]
     pub count: u32,
     /// just print out matched strings, no details or names
-    #[clap(short,long,default_value_t = false)]
+    #[clap(short, long, default_value_t = false)]
     pub quiet: bool,
 }
 
@@ -128,23 +147,29 @@ impl Config {
     /// a _Config_ instance whose members provide the desired values, or an error if the values are not allowed.
     pub fn load() -> Result<Config, &'static str> {
         let config = Config::parse();
-        if !"alternative".starts_with(&config.parser) && ! "traditional".starts_with(&config.parser) {
+        if !"alternative".starts_with(&config.parser) && !"traditional".starts_with(&config.parser)
+        {
             Err("Choices for parser are 'traditional' or 'alternative'")
         } else if config.interactive {
-            if !config.files.is_empty() { Err("FILE cannot be specified for interactive run") }
-            else if config.tree { Err("TREE cannot be specified for interactive run") }
-            else { Ok(config) }
-        }
-        else if config.re.is_empty() {
+            if !config.files.is_empty() {
+                Err("FILE cannot be specified for interactive run")
+            } else if config.tree {
+                Err("TREE cannot be specified for interactive run")
+            } else {
+                Ok(config)
+            }
+        } else if config.re.is_empty() {
             Err("RE is required unless --interactive given")
         } else if !config.text.is_empty() && !config.files.is_empty() {
             Err("FILE cannot be given if search text is passed in")
+        } else {
+            Ok(config)
         }
-        else {Ok(config)}
     }
     /// returns TRUE if the argument directs using the alternative parser, FALSE to use the traditional one
-    pub fn alt_parser(&self) -> bool { "traditional".starts_with(&self.parser) }
-        
+    pub fn alt_parser(&self) -> bool {
+        "traditional".starts_with(&self.parser)
+    }
 }
 
 //////////////////////////////////////////////////////////////////
@@ -156,7 +181,7 @@ impl Config {
 //
 //////////////////////////////////////////////////////////////////
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Report {
     /// Match information for the step this Report is representing
     pub matched: Matched,
@@ -178,14 +203,18 @@ impl<'a> Report {
     // API accessor functions
     /// Gets the string matched by this unit
     /// This is intended to be used inside an Input::apply() block, which is how to get the Input object
-    pub fn string<'b>(&'b self, input: &'b Input) -> &'b str { &input.full_text[self.matched.start..self.matched.end] }
+    pub fn string<'b>(&'b self, input: &'b Input) -> &'b str {
+        &input.full_text[self.matched.start..self.matched.end]
+    }
 
     /// Gets **Report** nodes representing matches for named Nodes. The return is a *Vec* because named matches can occur multiple
     /// times - for example, _\?\<name\>abc\)*_
     pub fn get_by_name<'b>(&'b self, name: &'b str) -> Vec<&Report> {
         let mut v = Vec::<&Report>::new();
         if let Some(n) = &self.name {
-            if n == name { v.push(self); }
+            if n == name {
+                v.push(self);
+            }
         }
         for r in &self.subreports {
             let mut x = r.get_by_name(name);
@@ -195,13 +224,16 @@ impl<'a> Report {
     }
 
     /// Gets a hash of  **Report** nodes grouped by name. This just sets things up and calls **get_named_internal()** to do the work
-    pub fn get_named(& self) -> HashMap<&str, Vec<&Report>> {
+    pub fn get_named(&self) -> HashMap<&str, Vec<&Report>> {
         let hash = HashMap::new();
         self.get_named_internal(hash)
     }
 
     /// internal function that does the work for **get_named()**
-    fn get_named_internal<'b: 'a>(&'b self, mut hash: HashMap<&'b str, Vec<&'b Report>>) -> HashMap<&'b str, Vec<&Report>> {
+    fn get_named_internal<'b: 'a>(
+        &'b self,
+        mut hash: HashMap<&'b str, Vec<&'b Report>>,
+    ) -> HashMap<&'b str, Vec<&Report>> {
         if let Some(name) = &self.name {
             if let Some(mut_v) = hash.get_mut(&name.as_str()) {
                 mut_v.push(self);
@@ -216,36 +248,63 @@ impl<'a> Report {
     }
 
     /// Gets the start and end position of the match in bytes
-    pub(crate) fn byte_pos(&self) -> (usize, usize) { (self.matched.start, self.matched.end) }
+    pub(crate) fn byte_pos(&self) -> (usize, usize) {
+        (self.matched.start, self.matched.end)
+    }
     /// Gets the start and end position of the match in chars
-    pub(crate) fn char_pos(&self) -> (usize, usize) { (self.matched.char_start, self.matched.char_start + self.matched.len_chars()) }
+    pub(crate) fn char_pos(&self) -> (usize, usize) {
+        (
+            self.matched.char_start,
+            self.matched.char_start + self.matched.len_chars(),
+        )
+    }
     /// Gets the length of the match in bytes
-    pub(crate) fn len_bytes(&self) -> usize { self.matched.len_bytes() }
+    pub(crate) fn len_bytes(&self) -> usize {
+        self.matched.len_bytes()
+    }
     /// Gets the length of the match in chars
-    pub(crate) fn len_chars(&self) -> usize { self.matched.len_chars() }
-//    pub fn full_string(&self) -> &str { self.matched.full_string }
+    pub(crate) fn len_chars(&self) -> usize {
+        self.matched.len_chars()
+    }
+    //    pub fn full_string(&self) -> &str { self.matched.full_string }
     /// Pretty-prints a report with indentation to help make it easier to read
     pub(crate) fn display(&self, indent: usize) {
-        let name_str = { if let Some(name) = &self.name { format!("<{}> ", name) } else { "".to_string() }};
+        let name_str = {
+            if let Some(name) = &self.name {
+                format!("<{}> ", name)
+            } else {
+                "".to_string()
+            }
+        };
         print!("{0:1$}", "", indent);
         let len_chars = self.matched.len_chars();
-        let file_str = Input::apply(|input| { if let Some(filename) = input.current_file() { format!(": {}", filename) } else { "".to_string() }});
-        Input::apply(|input| 
-                     println!("\"{}\" {}chars start {}, length {}; bytes start {}, length {}{}",
-                              &input.full_text[self.matched.start..self.matched.end],
-                              name_str,
-                              self.matched.char_start,
-                              len_chars,
-                              self.matched.start,
-                              self.matched.end - self.matched.start,
-                              file_str));
-        self.subreports.iter().for_each(move |r| r.display(indent + TAB_SIZE));
+        let file_str = Input::apply(|input| {
+            if let Some(filename) = input.current_file() {
+                format!(": {}", filename)
+            } else {
+                "".to_string()
+            }
+        });
+        Input::apply(|input| {
+            println!(
+                "\"{}\" {}chars start {}, length {}; bytes start {}, length {}{}",
+                &input.full_text[self.matched.start..self.matched.end],
+                name_str,
+                self.matched.char_start,
+                len_chars,
+                self.matched.start,
+                self.matched.end - self.matched.start,
+                file_str
+            )
+        });
+        self.subreports
+            .iter()
+            .for_each(move |r| r.display(indent + TAB_SIZE));
     }
-
 }
 
 /// value for tab size: the number of spaces to indent for each level
-pub const TAB_SIZE:usize = 4;
+pub const TAB_SIZE: usize = 4;
 
 /// the debug levelthe program is running under
 pub static TRACE_LEVEL: AtomicUsize = AtomicUsize::new(0);
@@ -256,7 +315,7 @@ pub(crate) fn set_trace(level: usize) {
     TRACE_LEVEL.store(level, Release)
 }
 
-/// **trace()** is used to control output of debug information, and also to view steps in the walk phase. It uses a static mut value in order to be available everywhere. 
+/// **trace()** is used to control output of debug information, and also to view steps in the walk phase. It uses a static mut value in order to be available everywhere.
 pub(crate) fn trace_level(level: usize) -> bool {
     level <= TRACE_LEVEL.load(Acquire)
 }
@@ -287,7 +346,12 @@ pub struct Error {
 
 impl Error {
     /// constructor
-    pub fn make(code: usize, msg: &str,) -> Error { Error{code, msg: msg.to_string()}}
+    pub fn make(code: usize, msg: &str) -> Error {
+        Error {
+            code,
+            msg: msg.to_string(),
+        }
+    }
 }
 
 impl core::fmt::Display for Error {
@@ -310,7 +374,8 @@ macro_rules! trace {
 macro_rules! trace_change_indent {
     ( $level:expr, $delta:expr) => {
         #[allow(unused_comparisons)]
-        if $level <= $crate::TRACE_LEVEL.load(core::sync::atomic::Ordering::Acquire) { $crate::TRACE_INDENT.fetch_add($delta, core::sync::atomic::Ordering::AcqRel); }
-    }
+        if $level <= $crate::TRACE_LEVEL.load(core::sync::atomic::Ordering::Acquire) {
+            $crate::TRACE_INDENT.fetch_add($delta, core::sync::atomic::Ordering::AcqRel);
+        }
+    };
 }
-

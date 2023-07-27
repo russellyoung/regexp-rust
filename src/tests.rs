@@ -1,6 +1,6 @@
 use crate::regexp::Report;
 use crate::tree::*;
-use crate::walk::{walk_tree,Input};
+use crate::walk::{walk_tree, Input};
 use std::io::Write;
 use std::sync::Mutex;
 
@@ -30,17 +30,18 @@ fn peekable() {
     assert_eq!(Some('c'), chars.next());
     assert_eq!((Some('d'), Some('e')), chars.peek_2());
     let peek_4 = chars.peek_n(4);
-    assert!(peek_4.len() == 4
+    assert!(
+        peek_4.len() == 4
             && Some('d') == peek_4[0]
             && Some('e') == peek_4[1]
             && Some('z') == peek_4[2]
-            && peek_4[3].is_none());
+            && peek_4[3].is_none()
+    );
     assert_eq!(Some('d'), chars.next());
     assert_eq!(Some('e'), chars.next());
     assert_eq!(Some('z'), chars.next());
     assert_eq!(None, chars.next());
     assert_eq!(None, chars.peek());
-    
 }
 
 //
@@ -51,30 +52,63 @@ fn limits_test() {
     let mut x = LOCK.lock().unwrap();
     *x += 1;
     let limits_string = " ? * + {2} {3,5} {6,} ?? *? +? {2}? {3,5}? {6,}? ";
-    let data: [(usize, usize, bool); 13] = [(1, 1, false),
-                                            (0, 1, false),
-                                            (0, EFFECTIVELY_INFINITE, false),
-                                            (1, EFFECTIVELY_INFINITE, false),
-                                            (2, 2, false),
-                                            (3, 5, false),
-                                            (6, EFFECTIVELY_INFINITE, false),
-                                            (0, 1, true),
-                                            (0, EFFECTIVELY_INFINITE, true),
-                                            (1, EFFECTIVELY_INFINITE, true),
-                                            (2, 2, true),
-                                            (3, 5, true),
-                                            (6, EFFECTIVELY_INFINITE, true),
+    let data: [(usize, usize, bool); 13] = [
+        (1, 1, false),
+        (0, 1, false),
+        (0, EFFECTIVELY_INFINITE, false),
+        (1, EFFECTIVELY_INFINITE, false),
+        (2, 2, false),
+        (3, 5, false),
+        (6, EFFECTIVELY_INFINITE, false),
+        (0, 1, true),
+        (0, EFFECTIVELY_INFINITE, true),
+        (1, EFFECTIVELY_INFINITE, true),
+        (2, 2, true),
+        (3, 5, true),
+        (6, EFFECTIVELY_INFINITE, true),
     ];
-    let mut chars = Peekable::new(limits_string); 
+    let mut chars = Peekable::new(limits_string);
     for (min, max, lazy) in data {
         if let Ok(limits) = Limits::parse(&mut chars) {
             assert!(chars.next().unwrap() == ' ', "unexpected parse results");
-            assert!(limits.check(min) < 0, "< min check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.check(min + 1) == 0, "= min check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.check(max + 1) == 0, "= max check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.check(max + 2) > 0, "> max check failed for ({}, {}, {})", min, max, lazy);
-            assert!(limits.lazy() == lazy, "lazy check failed for ({}, {}, {})", min, max, lazy);
-        } else { panic!("failed parsing Limits"); }
+            assert!(
+                limits.check(min) < 0,
+                "< min check failed for ({}, {}, {})",
+                min,
+                max,
+                lazy
+            );
+            assert!(
+                limits.check(min + 1) == 0,
+                "= min check failed for ({}, {}, {})",
+                min,
+                max,
+                lazy
+            );
+            assert!(
+                limits.check(max + 1) == 0,
+                "= max check failed for ({}, {}, {})",
+                min,
+                max,
+                lazy
+            );
+            assert!(
+                limits.check(max + 2) > 0,
+                "> max check failed for ({}, {}, {})",
+                min,
+                max,
+                lazy
+            );
+            assert!(
+                limits.lazy() == lazy,
+                "lazy check failed for ({}, {}, {})",
+                min,
+                max,
+                lazy
+            );
+        } else {
+            panic!("failed parsing Limits");
+        }
     }
     assert!(chars.next().is_none(), "Failed to consume test string");
 }
@@ -83,22 +117,45 @@ fn limits_test() {
 // parser tests
 //
 fn make_chars_string(string: &str) -> Node {
-        Node::Chars(CharsNode{string: string.to_string(), limits: Limits::default(), named: None, name_outside: false})
+    Node::Chars(CharsNode {
+        string: string.to_string(),
+        limits: Limits::default(),
+        named: None,
+        name_outside: false,
+    })
 }
 fn make_chars_single(ch: char, min: usize, max: usize, lazy: bool) -> Node {
     let options = if lazy { Limits::LAZY } else { 0 };
-    Node::Chars(CharsNode{string: ch.to_string(), limits: Limits{min, max, options}, named: None, name_outside: false})
+    Node::Chars(CharsNode {
+        string: ch.to_string(),
+        limits: Limits { min, max, options },
+        named: None,
+        name_outside: false,
+    })
 }
 
-fn make_root (min: usize, max: usize, lazy: bool) -> Node { make_and(min, max, lazy, Some(""))}
+fn make_root(min: usize, max: usize, lazy: bool) -> Node {
+    make_and(min, max, lazy, Some(""))
+}
 
-fn make_and (min: usize, max: usize, lazy: bool, name: Option<&str>) -> Node {
+fn make_and(min: usize, max: usize, lazy: bool, name: Option<&str>) -> Node {
     let options = if lazy { Limits::LAZY } else { 0 };
     let named = name.map(|n| n.to_string());
-    Node::And(AndNode{nodes: Vec::<Node>::new(), limits: Limits{min, max, options}, named, anchor: false, name_outside: false})
+    Node::And(AndNode {
+        nodes: Vec::<Node>::new(),
+        limits: Limits { min, max, options },
+        named,
+        anchor: false,
+        name_outside: false,
+    })
 }
 fn make_or() -> Node {
-    Node::Or(OrNode{nodes: Vec::<Node>::new(), limits: Limits::default(), named: None, name_outside: false})
+    Node::Or(OrNode {
+        nodes: Vec::<Node>::new(),
+        limits: Limits::default(),
+        named: None,
+        name_outside: false,
+    })
 }
 
 impl Node {
@@ -106,7 +163,7 @@ impl Node {
         match self {
             Node::And(and_node) => and_node.nodes.push(node),
             Node::Or(or_node) => or_node.nodes.push(node),
-            _ => panic!("can only push to And or Or node")
+            _ => panic!("can only push to And or Or node"),
         }
     }
 }
@@ -136,7 +193,7 @@ fn test_string_embedded_reps_greedy() {
     node.push(make_chars_single('i', 0, EFFECTIVELY_INFINITE, false));
     assert_eq!(node, parse_tree("abc?def+ghi*", false).unwrap());
 }
-              
+
 #[test]
 fn test_string_embedded_reps_lazy() {
     let mut x = LOCK.lock().unwrap();
@@ -170,20 +227,37 @@ fn or_with_chars_bug() {
 fn find<'a>(alt: bool, re: &'a str, text: &'a str, expected: &'a str) {
     print!("RUNNING '{}' '{}'... ", re, text);
     std::io::stdout().flush().unwrap();
-    let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    if let Err(msg) = Input::init_text(text) { panic!("{}", msg); }
+    let tree =
+        parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    if let Err(msg) = Input::init_text(text) {
+        panic!("{}", msg);
+    }
     let path = walk_tree(&tree, 0)
         .unwrap_or_else(|err| panic!("Expected \"{}\", got error '{}'", expected, err))
         .unwrap_or_else(|| panic!("Expected {}, found none", expected));
-    assert_eq!(path.matched_string(), expected, "re \"{}\" expected \"{}\", found \"{}\"", re, expected, path.matched_string());
+    assert_eq!(
+        path.matched_string(),
+        expected,
+        "re \"{}\" expected \"{}\", found \"{}\"",
+        re,
+        expected,
+        path.matched_string()
+    );
     println!("OK");
-}       
-        
+}
+
 fn not_find<'a>(alt: bool, re: &'a str, text: &'a str) {
-    let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    if let Err(msg) = Input::init_text(text) { panic!("{}", msg); }
-    assert!(walk_tree(&tree, 0).unwrap().is_none(), "re \"{}\" expected no match, found one", re);
-}       
+    let tree =
+        parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    if let Err(msg) = Input::init_text(text) {
+        panic!("{}", msg);
+    }
+    assert!(
+        walk_tree(&tree, 0).unwrap().is_none(),
+        "re \"{}\" expected no match, found one",
+        re
+    );
+}
 
 //
 // walk tests
@@ -216,7 +290,7 @@ fn rep_chars() {
     find(false, r"a\d*\|b*c", "a12c", "a12c");
     not_find(false, r"a\d*\|b*c", "aa1bcc");
 }
-    
+
 #[test]
 fn unicode() {
     let mut x = LOCK.lock().unwrap();
@@ -225,7 +299,7 @@ fn unicode() {
     find(false, "你好", "ab你好abcd", "你好");
     find(false, "你好you-all", "ab你好you-allabcd", "你好you-all");
     find(false, "a.*a", "qqab你好abcd", "ab你好a");
-    find(false, r"是很*好", "这是很很很好",  "是很很很好");
+    find(false, r"是很*好", "这是很很很好", "是很很很好");
 }
 
 #[test]
@@ -268,7 +342,7 @@ fn special_chars() {
     find(false, r"a\d+\l+", "aba123Ba123bcD", "a123bc");
     find(false, r"\a\u+", "你好abCD没有", "bCD");
 }
-    
+
 #[test]
 fn set_chars() {
     let mut x = LOCK.lock().unwrap();
@@ -333,7 +407,7 @@ fn lazy() {
     find(false, r"ab*\|b", "abbbbbc", "abbbbb");
     find(false, r"ab*?\|b", "abbbbbc", "a");
     find(false, r"ab+?\|b", "abbbbbc", "ab");
-    find(false, r"ab+?c", "abbbbbc", "abbbbbc");     // lazy back off
+    find(false, r"ab+?c", "abbbbbc", "abbbbbc"); // lazy back off
 }
 
 #[test]
@@ -345,15 +419,26 @@ fn former_bugs() {
 }
 
 fn report_test<'a>(re: &'a str, text: &'a str, alt: bool, func: fn(&Report)) {
-    let tree = parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    if let Err(msg) = Input::init_text(text) { panic!("{}", msg); }
-    let path = walk_tree(&tree, 0).unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re)).unwrap_or_else(|| panic!("search unexpectedly failed"));
+    let tree =
+        parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
+    if let Err(msg) = Input::init_text(text) {
+        panic!("{}", msg);
+    }
+    let path = walk_tree(&tree, 0)
+        .unwrap_or_else(|_| panic!("RE \"{}\" failed to parse", re))
+        .unwrap_or_else(|| panic!("search unexpectedly failed"));
 
     let report = Report::new(&path);
     func(&report);
-}       
+}
 
-fn check_report(report: &Report, expected: &str, pos: (usize, usize), bytes: (usize, usize), child_count: usize) {
+fn check_report(
+    report: &Report,
+    expected: &str,
+    pos: (usize, usize),
+    bytes: (usize, usize),
+    child_count: usize,
+) {
     Input::apply(|input| assert_eq!(report.string(input), expected));
     assert_eq!(report.char_pos(), pos);
     assert_eq!(report.byte_pos(), bytes);
@@ -380,61 +465,76 @@ fn reports() {
     });
     // basic, unicode
     report_test("你好", ".你好.", false, |report: &Report| {
-        check_report(report, "你好", (1, 3), (1, 7), 0); }
-    );
+        check_report(report, "你好", (1, 3), (1, 7), 0);
+    });
     // simple AND
     report_test(r"ab\(cd\)ef", ".abcdef.", false, |report: &Report| {
         check_report(report, "abcdef", (1, 7), (1, 7), 1);
         check_report(&report.subreports[0], "cd", (3, 5), (3, 5), 0);
     });
     // simple AND unicode
-    report_test(r"ab\(你\)好ef", ".ab你好ef.", false, |report: &Report| {
-        check_report(report, "ab你好ef", (1, 7), (1, 11), 1);
-        check_report(&report.subreports[0], "你", (3, 4), (3, 6), 0);
-        assert!(report.get_by_name("fred").is_empty());
-    });
+    report_test(
+        r"ab\(你\)好ef",
+        ".ab你好ef.",
+        false,
+        |report: &Report| {
+            check_report(report, "ab你好ef", (1, 7), (1, 11), 1);
+            check_report(&report.subreports[0], "你", (3, 4), (3, 6), 0);
+            assert!(report.get_by_name("fred").is_empty());
+        },
+    );
 
     // nested and with repetition
-    report_test(r"ab\(cd\(ef\)+\)+", ".abcdefefcd.", false, |report: &Report| {
-        check_report(report, "abcdefef", (1, 9), (1, 9), 1);
-        check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
-        check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
-        check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
-    });
+    report_test(
+        r"ab\(cd\(ef\)+\)+",
+        ".abcdefefcd.",
+        false,
+        |report: &Report| {
+            check_report(report, "abcdefef", (1, 9), (1, 9), 1);
+            check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
+            check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
+            check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
+        },
+    );
     // silent AND
     report_test(r"ab\(?cd\)ef", ".abcdef.", false, |report: &Report| {
         check_report(report, "abcdef", (1, 7), (1, 7), 0);
     });
     // named
-    report_test(r"ab\(?<first>cd\(?<second>ef\)+\)+", ".abcdefefcd.", false, |report| {
-        check_report(report, "abcdefef", (1, 9), (1, 9), 1);
-        check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
-        check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
-        check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
-        assert!(report.get_by_name("fred").is_empty());
-        let first = report.get_by_name("first");
-        assert!(first.len() == 1);
-        check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
-        let second = report.get_by_name("second");
-        assert!(second.len() == 2);
-        check_report(second[0], "ef", (5, 7), (5, 7), 0);
-        check_report(second[1], "ef", (7, 9), (7, 9), 0);
-        let zeroth = report.get_by_name("");
-        check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
-        assert!(report.get_by_name("fake").is_empty());
-        // all names
-        let all = report.get_named();
-        let zeroth = all.get("").unwrap();
-        check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
-        let first = all.get("first").unwrap();
-        assert!(first.len() == 1);
-        check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
-        let second = all.get("second").unwrap();
-        assert!(second.len() == 2);
-        check_report(second[0], "ef", (5, 7), (5, 7), 0);
-        check_report(second[1], "ef", (7, 9), (7, 9), 0);
-        assert!(all.get("fake").is_none());
-    });
+    report_test(
+        r"ab\(?<first>cd\(?<second>ef\)+\)+",
+        ".abcdefefcd.",
+        false,
+        |report| {
+            check_report(report, "abcdefef", (1, 9), (1, 9), 1);
+            check_report(&report.subreports[0], "cdefef", (3, 9), (3, 9), 2);
+            check_report(&report.subreports[0].subreports[0], "ef", (5, 7), (5, 7), 0);
+            check_report(&report.subreports[0].subreports[1], "ef", (7, 9), (7, 9), 0);
+            assert!(report.get_by_name("fred").is_empty());
+            let first = report.get_by_name("first");
+            assert!(first.len() == 1);
+            check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
+            let second = report.get_by_name("second");
+            assert!(second.len() == 2);
+            check_report(second[0], "ef", (5, 7), (5, 7), 0);
+            check_report(second[1], "ef", (7, 9), (7, 9), 0);
+            let zeroth = report.get_by_name("");
+            check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
+            assert!(report.get_by_name("fake").is_empty());
+            // all names
+            let all = report.get_named();
+            let zeroth = all.get("").unwrap();
+            check_report(zeroth[0], "abcdefef", (1, 9), (1, 9), 1);
+            let first = all.get("first").unwrap();
+            assert!(first.len() == 1);
+            check_report(first[0], "cdefef", (3, 9), (3, 9), 2);
+            let second = all.get("second").unwrap();
+            assert!(second.len() == 2);
+            check_report(second[0], "ef", (5, 7), (5, 7), 0);
+            check_report(second[1], "ef", (7, 9), (7, 9), 0);
+            assert!(all.get("fake").is_none());
+        },
+    );
 }
 //
 // error tests
@@ -442,7 +542,14 @@ fn reports() {
 fn e_check(alt: bool, re: &str, ecode: usize) {
     match parse_tree(re, alt) {
         Ok(_) => panic!("Expected error {} parsing \"{}\", didn't get it", ecode, re),
-        Err(error) => assert!(error.code == ecode, "Parsing \"{}\", expected error {}, found error {} ({})", re, ecode, error.code, error.msg),
+        Err(error) => assert!(
+            error.code == ecode,
+            "Parsing \"{}\", expected error {}, found error {} ({})",
+            re,
+            ecode,
+            error.code,
+            error.msg
+        ),
     }
 }
 #[test]
@@ -494,8 +601,13 @@ fn alt_chars() {
 fn alt_or() {
     let mut x = LOCK.lock().unwrap();
     *x += 1;
-    find(true, r"or('abc'
- 	'def')", "xdefd", "def");
+    find(
+        true,
+        r"or('abc'
+ 	'def')",
+        "xdefd",
+        "def",
+    );
     find(true, r"or(a{3} y+ z )", "aayx", "y");
     find(true, r"or(a{3} y+ z )", "aaayyz", "aaa");
     find(true, r"or(a{3} y+ z )", "aazayyz", "z");
@@ -507,10 +619,25 @@ fn alt_def() {
     let mut x = LOCK.lock().unwrap();
     *x += 1;
     find(true, "def(xx: 'xyz') w get(xx)", "vwxyz", "wxyz");
-    find(true, "def(aa: 'xyz') w get(aa) get(aa)", "vwxyzxyz", "wxyzxyz");
+    find(
+        true,
+        "def(aa: 'xyz') w get(aa) get(aa)",
+        "vwxyzxyz",
+        "wxyzxyz",
+    );
     find(true, "use(src/regexp/test.re) a get(a)", "aabcdef", "abcd");
-    find(true, "use(src/regexp/test.re) a get(z)+", "aawxyzwx", "awxyzwx");
-    find(true, r"def(a: x ){3} get(a) b get(a){4}", "zxxxxbxxxxxx", "xxxbxxxx");
+    find(
+        true,
+        "use(src/regexp/test.re) a get(z)+",
+        "aawxyzwx",
+        "awxyzwx",
+    );
+    find(
+        true,
+        r"def(a: x ){3} get(a) b get(a){4}",
+        "zxxxxbxxxxxx",
+        "xxxbxxxx",
+    );
 }
 
 #[test]
@@ -524,8 +651,12 @@ fn alt_err() {
     e_check(true, r"or(abc or(def ", 105);
     e_check(true, r"get() ", 106);
     e_check(true, r"get(a() ", 107);
-//    e_check(true, r"get(a) ", 108);
-    e_check(true, r"def(snippet_a: aa get(snippet_b)zz ) def(snippet_b: bb get(snippet_a) yy ) abcd get(snippet_a) wxyz ", 109);
+    //    e_check(true, r"get(a) ", 108);
+    e_check(
+        true,
+        r"def(snippet_a: aa get(snippet_b)zz ) def(snippet_b: bb get(snippet_a) yy ) abcd get(snippet_a) wxyz ",
+        109,
+    );
     e_check(true, r"and(asd )<xy ", 110);
     e_check(true, r"def(asd)", 111);
     e_check(true, r"def(asd:)", 112);
@@ -538,31 +669,39 @@ fn runtime_error() {
     *x += 1;
     // infinite loop test
     if let Ok(tree) = parse_tree(r"and('x'*)*", true) {
-        if let Err(msg) = Input::init_text("abccc") { panic!("{}", msg); }
+        if let Err(msg) = Input::init_text("abccc") {
+            panic!("{}", msg);
+        }
         match walk_tree(&tree, 0) {
             Err(e) if e.code == 200 => (),
             _ => panic!("Expected infinite loop, didn't get it"),
         }
-    } else { panic!("Parse failed for infinite loop test"); }
+    } else {
+        panic!("Parse failed for infinite loop test");
+    }
 }
-
 
 #[test]
 // check that X*<NAME> and X<NAME>* behave right
 fn alt_report() {
     let mut x = LOCK.lock().unwrap();
     *x += 1;
-    report_test(r"a and('bc'<n1>* '你好'*<n2>)", "xabcbc你好你好", true, |report| {
-        check_report(report, "abcbc你好你好", (1, 10), (1, 18), 3);
-        check_report(&report.subreports[0], "bc", (2, 4), (2, 4), 0);
-        check_report(&report.subreports[1], "bc", (4, 6), (4, 6), 0);
-        check_report(&report.subreports[2], "你好你好", (6, 10), (6, 18), 0);
-        let n1 = report.get_by_name("n1");
-        assert_eq!(n1.len(), 2, "<n>* test failed");
-        let n2 = report.get_by_name("n2");
-        assert_eq!(n2.len(), 1, "*<n> test failed");
-    });
-} 
+    report_test(
+        r"a and('bc'<n1>* '你好'*<n2>)",
+        "xabcbc你好你好",
+        true,
+        |report| {
+            check_report(report, "abcbc你好你好", (1, 10), (1, 18), 3);
+            check_report(&report.subreports[0], "bc", (2, 4), (2, 4), 0);
+            check_report(&report.subreports[1], "bc", (4, 6), (4, 6), 0);
+            check_report(&report.subreports[2], "你好你好", (6, 10), (6, 18), 0);
+            let n1 = report.get_by_name("n1");
+            assert_eq!(n1.len(), 2, "<n>* test failed");
+            let n2 = report.get_by_name("n2");
+            assert_eq!(n2.len(), 1, "*<n> test failed");
+        },
+    );
+}
 
 #[test]
 fn from_file() {
@@ -570,11 +709,19 @@ fn from_file() {
     *x += 1;
     print!("RUNNING file input test");
     std::io::stdout().flush().unwrap();
-    let tree = parse_tree("XXX", false).unwrap_or_else(|msg| panic!("Parse failed for re \"XXX\": {}", msg));
-    if let Err(msg) = Input::init_files(&vec!["README".to_string()]) { panic!("{}", msg); }
+    let tree = parse_tree("XXX", false)
+        .unwrap_or_else(|msg| panic!("Parse failed for re \"XXX\": {}", msg));
+    if let Err(msg) = Input::init_files(&vec!["README".to_string()]) {
+        panic!("{}", msg);
+    }
     let path = walk_tree(&tree, 0)
         .unwrap_or_else(|err| panic!("Expected \"XXX\", got error '{}'", err))
         .unwrap_or_else(|| panic!("Expected \"XXX\", found none"));
-    assert_eq!(path.matched_string(), "XXX", "expected \"XXX\", found \"{}\"", path.matched_string());
+    assert_eq!(
+        path.matched_string(),
+        "XXX",
+        "expected \"XXX\", found \"{}\"",
+        path.matched_string()
+    );
     println!("OK");
 }
