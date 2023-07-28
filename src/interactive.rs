@@ -212,7 +212,7 @@ impl Interactive {
 
     /// parses the entered string to get a command, and call **execute_command()** to do it. Return *false* to exit.
     fn do_command(&mut self, input: &str, cmd_parse_tree: &Node) -> bool {
-        if let Err(msg) = Input::init_text(input) {
+        if let Err(msg) = Input::init_text(input, false) {
             println!("{}", msg);
             return false;
         }
@@ -445,7 +445,7 @@ impl Interactive {
                 Err(err) => println!("Error parsing RE: {}", err.msg),
                 Ok(node) => {
                     set_trace(trace);
-                    if let Err(msg) = Input::init_text(text) {
+                    if let Err(msg) = Input::init_text(text, false) {
                         println!("{}", msg);
                         return;
                     }

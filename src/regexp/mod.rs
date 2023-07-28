@@ -24,12 +24,13 @@ pub fn regexp(config: &Config) -> Result<usize, Error> {
         tree.desc(0);
     }
     if !config.text.is_empty() {
-        Input::init_text(&config.text)?
+        Input::init_text(&config.text, config.lines)?
     } else if !config.files.is_empty() {
-        Input::init_files(&config.files)?
+        Input::init_files(&config.files, config.lines)?
     } else {
-        Input::init_stdin()?
+        Input::init_stdin(config.lines)?
     }
+    
     let mut start: usize = 0;
     let match_number: usize = if config.all { 0 } else { config.count as usize };
     'main: loop {
@@ -53,13 +54,12 @@ pub fn regexp(config: &Config) -> Result<usize, Error> {
                     path.dump(0);
                     println!("--- End walk");
                 }
-                if config.quiet {
-                    let (from, to) = path.range();
+                if config.quiet | config.lines {
                     Input::apply(|input| {
                         if let Some(filename) = input.current_file() {
-                            println!("{} ({})", &input.full_text[from..to], filename);
+                            println!("{}: {}", filename, path.match_display(input));
                         } else {
-                            println!("{}", &input.full_text[from..to]);
+                            println!("{}", path.match_display(input));
                         }
                     });
                 } else {
@@ -140,6 +140,9 @@ pub struct Config {
     /// just print out matched strings, no details or names
     #[clap(short, long, default_value_t = false)]
     pub quiet: bool,
+    /// print out line(s) containing each match
+    #[clap(short, long, default_value_t = false)]
+    pub lines: bool,
 }
 
 impl Config {
@@ -280,21 +283,21 @@ impl<'a> Report {
         let len_chars = self.matched.len_chars();
         let file_str = Input::apply(|input| {
             if let Some(filename) = input.current_file() {
-                format!(": {}", filename)
+                format!("{}: ", filename)
             } else {
                 "".to_string()
             }
         });
         Input::apply(|input| {
             println!(
-                "\"{}\" {}chars start {}, length {}; bytes start {}, length {}{}",
+                "{}\"{}\" {}chars start {}, length {}; bytes start {}, length {}",
+                file_str,
                 &input.full_text[self.matched.start..self.matched.end],
                 name_str,
                 self.matched.char_start,
                 len_chars,
                 self.matched.start,
-                self.matched.end - self.matched.start,
-                file_str
+                self.matched.end - self.matched.start
             )
         });
         self.subreports

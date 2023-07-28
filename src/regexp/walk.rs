@@ -494,6 +494,33 @@ impl<'a> Path<'a> {
             Path::None => "None",
         }
     }
+
+    /// This returns the input substring to display for a match. This can be either just the matches or all lines
+    /// containing the matches. It takes &Input as an arg, which means it must be called from within an
+    /// Input::apply() closure
+    pub fn match_display<'b>(&'b self, input: &'b Input) -> &'b str {
+        let (from, to) = self.range();
+        if !input.line_ends.is_empty() {  // print line(s) containing the match
+            let mut low: usize = 0;
+            let mut high: usize = input.line_ends.len();
+            let mut p0: usize;
+            loop {
+                p0 = low + (high - low)/2;
+                if p0 == low || from == input.line_ends[p0] { break; }
+                if input.line_ends[p0] < from { low = p0; }
+                else { high = p0; }
+            }
+            let mut p1 = p0 + 1;
+            while p1 < input.line_ends.len() && input.line_ends[p1] < to {
+                p1 += 1;
+            }
+            if p1 < input.line_ends.len() { &input.full_text[input.line_ends[p0]..input.line_ends[p1] - 1] }
+            else { &input.full_text[input.line_ends[p0]..] }
+        } else {  // print just the match string
+            &input.full_text[from..to]
+        }
+    }
+    
 }
 
 // I think new steps cannot go backwards, so if any step but step 0 has a series of matches of length 0 (maybe even
@@ -1262,9 +1289,11 @@ enum Source {
 
 impl Source {
     /// Extends by unit of BLOCK_SIZE if possible. Returns String to add along with boolean telling if the input is exhausted, or program error format
-    fn extend(&mut self) -> Result<(String, bool), Error> {
+    fn extend(&mut self, buf_size: Option<usize>) -> Result<(String, bool, Vec<usize>), Error> {
         let mut string = "".to_string();
         let mut more = true;
+        let mut line_ends = Vec::<usize>::new();
+        let buf_size = if let Some(bsize) = buf_size { bsize } else { 0 };
         match self {
             Source::CmdLine => more = false,
             Source::File(stream) => {
@@ -1277,7 +1306,7 @@ impl Source {
                             more = false;
                             break;
                         }
-                        std::io::Result::Ok(_bytes) => (),
+                        std::io::Result::Ok(_bytes) => line_ends.push(buf_size + string.len()),
                     }
                 }
             }
@@ -1293,7 +1322,7 @@ impl Source {
             }
             Source::None => panic!("No input source has been set"),
         }
-        Ok((string, more))
+        Ok((string, more, line_ends))
     }
 }
 
@@ -1307,6 +1336,8 @@ impl Source {
 pub struct Input {
     /// The text currently in the buffer
     pub full_text: String,
+    /// if this is empty just print out the matches, if non-empty it holds the line end positions, print out lines containing matches
+    line_ends: Vec<usize>,
     /// The source for getting more text
     source: Source,
     /// flag cleared when the input source is exhausted
@@ -1329,41 +1360,51 @@ impl Input {
     // Creation
     //
     /// initializes text buffer to get the string from the command line
-    pub fn init_text(text: &str) -> Result<(), Error> {
+    pub fn init_text(text: &str, full_lines: bool) -> Result<(), Error> {
         if text.is_empty() {
-            return Input::init_stdin();
+            return Input::init_stdin(full_lines);
         }
         let mut input = INPUT.lock().unwrap();
         input.source = Source::CmdLine;
         input.full_text = text.to_string();
+        input.result_lines(full_lines);
+        // TODO: line ends vec
         Ok(())
     }
 
     /// initializes text buffer to get the string from stdin
-    pub fn init_stdin() -> Result<(), Error> {
+    pub fn init_stdin(full_lines: bool) -> Result<(), Error> {
         let mut input = INPUT.lock().unwrap();
         input.source = Source::Stdin(BufReader::new(std::io::stdin()));
         input.more_input = true;
+        input.result_lines(full_lines);
         input._extend(1)?; // any positive number forces a read
         Ok(())
     }
 
     /// initializes text buffer to get text from a list of files
-    pub fn init_files(filenames: &Vec<String>) -> Result<(), Error> {
+    pub fn init_files(filenames: &Vec<String>, full_lines: bool) -> Result<(), Error> {
         if filenames.is_empty() {
-            return Input::init_stdin();
+            return Input::init_stdin(full_lines);
         }
         let mut input = INPUT.lock().unwrap();
+        input.result_lines(full_lines);
         input.filenames = Some(filenames.clone());
         input.fileno = 0;
         input.use_file(filenames[0].as_str())
     }
 
+    pub fn result_lines(&mut self, lines: bool) {
+        self.line_ends = Vec::<usize>::new();
+        if lines { self.line_ends.push(0); }
+    }
+    
     /// sets up the text input to read from a new file
     fn use_file(&mut self, filename: &str) -> Result<(), Error> {
         trace!(1, "trying to open file {} for input", filename);
         if filename == "-" {
-            Input::init_stdin()
+            let full_lines = Input::apply(|input| !input.line_ends.is_empty());
+            Input::init_stdin(full_lines)
         } else {
             match std::fs::File::open(filename) {
                 Err(err) => {
@@ -1374,6 +1415,7 @@ impl Input {
                     self.source = Source::File(BufReader::new(file));
                     self.more_input = true;
                     self.full_text = "".to_string();
+                    self.result_lines(!self.line_ends.is_empty());
                     self._extend(1)?; // any positive number forces a read
                     Ok(())
                 }
@@ -1437,9 +1479,11 @@ impl Input {
     /// Checks that the input string is either fully read in or exceeds SIZE_BYTES in length
     fn _extend(&mut self, size_bytes: usize) -> Result<(), Error> {
         if self.more_input && self.full_text.len() < size_bytes {
-            let (string, more) = self.source.extend()?;
+            let full_lines = !self.line_ends.is_empty();
+            let (string, more, mut ends) = self.source.extend(if full_lines { Some(self.full_text.len()) } else { None })?;
             self.more_input = more;
             self.full_text.push_str(&string);
+            if !self.line_ends.is_empty() { self.line_ends.append(&mut ends); }
         }
         Ok(())
     }

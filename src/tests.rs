@@ -229,7 +229,7 @@ fn find<'a>(alt: bool, re: &'a str, text: &'a str, expected: &'a str) {
     std::io::stdout().flush().unwrap();
     let tree =
         parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    if let Err(msg) = Input::init_text(text) {
+    if let Err(msg) = Input::init_text(text, false) {
         panic!("{}", msg);
     }
     let path = walk_tree(&tree, 0)
@@ -249,7 +249,7 @@ fn find<'a>(alt: bool, re: &'a str, text: &'a str, expected: &'a str) {
 fn not_find<'a>(alt: bool, re: &'a str, text: &'a str) {
     let tree =
         parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    if let Err(msg) = Input::init_text(text) {
+    if let Err(msg) = Input::init_text(text, false) {
         panic!("{}", msg);
     }
     assert!(
@@ -421,7 +421,7 @@ fn former_bugs() {
 fn report_test<'a>(re: &'a str, text: &'a str, alt: bool, func: fn(&Report)) {
     let tree =
         parse_tree(re, alt).unwrap_or_else(|msg| panic!("Parse failed for re \"{}\": {}", re, msg));
-    if let Err(msg) = Input::init_text(text) {
+    if let Err(msg) = Input::init_text(text, false) {
         panic!("{}", msg);
     }
     let path = walk_tree(&tree, 0)
@@ -669,7 +669,7 @@ fn runtime_error() {
     *x += 1;
     // infinite loop test
     if let Ok(tree) = parse_tree(r"and('x'*)*", true) {
-        if let Err(msg) = Input::init_text("abccc") {
+        if let Err(msg) = Input::init_text("abccc", false) {
             panic!("{}", msg);
         }
         match walk_tree(&tree, 0) {
@@ -711,7 +711,7 @@ fn from_file() {
     std::io::stdout().flush().unwrap();
     let tree = parse_tree("XXX", false)
         .unwrap_or_else(|msg| panic!("Parse failed for re \"XXX\": {}", msg));
-    if let Err(msg) = Input::init_files(&vec!["README".to_string()]) {
+    if let Err(msg) = Input::init_files(&vec!["README".to_string()], false) {
         panic!("{}", msg);
     }
     let path = walk_tree(&tree, 0)
